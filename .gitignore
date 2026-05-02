@@ -1,0 +1,18 @@
+# secrets
+.env
+*.env
+!.env.example
+*service-account*.json
+*credentials*.json
+
+# python caches
+__pycache__/
+*.py[cod]
+.venv/
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
+.coverage
+*.egg-info/
+build/
+dist/
