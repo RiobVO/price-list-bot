@@ -3,11 +3,12 @@
 from __future__ import annotations
 
 from dataclasses import FrozenInstanceError
+from datetime import UTC, datetime
 from decimal import Decimal
 
 import pytest
 
-from src.data.models import Catalog, Product, RowIssue, SchemaError
+from src.data.models import Catalog, ParseResult, Product, RowIssue, SchemaError, Snapshot
 
 
 def _make_product(**overrides: object) -> Product:
@@ -130,3 +131,41 @@ def test_catalog_is_frozen() -> None:
     catalog = Catalog.build([_make_product(id="a")])
     with pytest.raises(FrozenInstanceError):
         catalog.products = ()  # type: ignore[misc]
+
+
+def test_parse_result_holds_catalog_and_counters() -> None:
+    catalog = Catalog.build([_make_product(id="a")])
+    issue = RowIssue(row_number=2, product_id=None, reason="missing_required", detail="empty id")
+    result = ParseResult(catalog=catalog, issues=(issue,), valid_rows=1, skipped_rows=1)
+    assert result.catalog is catalog
+    assert result.issues == (issue,)
+    assert result.valid_rows == 1
+    assert result.skipped_rows == 1
+
+
+def test_parse_result_is_frozen() -> None:
+    result = ParseResult(catalog=Catalog.build([]), issues=(), valid_rows=0, skipped_rows=0)
+    with pytest.raises(FrozenInstanceError):
+        result.valid_rows = 5  # type: ignore[misc]
+
+
+def test_snapshot_cold_start_allows_none_catalog() -> None:
+    """До первого валидного снимка catalog и updated_at = None (cold-start)."""
+    snap = Snapshot(catalog=None, updated_at=None, valid_rows=0, skipped_rows=0)
+    assert snap.catalog is None
+    assert snap.updated_at is None
+
+
+def test_snapshot_with_catalog_and_timestamp() -> None:
+    catalog = Catalog.build([_make_product(id="a")])
+    ts = datetime(2026, 5, 31, tzinfo=UTC)
+    snap = Snapshot(catalog=catalog, updated_at=ts, valid_rows=1, skipped_rows=0)
+    assert snap.catalog is catalog
+    assert snap.updated_at == ts
+    assert snap.valid_rows == 1
+
+
+def test_snapshot_is_frozen() -> None:
+    snap = Snapshot(catalog=None, updated_at=None, valid_rows=0, skipped_rows=0)
+    with pytest.raises(FrozenInstanceError):
+        snap.valid_rows = 1  # type: ignore[misc]
