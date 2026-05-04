@@ -7,7 +7,7 @@ from decimal import Decimal
 
 import pytest
 
-from src.data.models import Product, RowIssue, SchemaError
+from src.data.models import Catalog, Product, RowIssue, SchemaError
 
 
 def _make_product(**overrides: object) -> Product:
@@ -91,3 +91,42 @@ def test_schema_error_is_exception() -> None:
     assert issubclass(SchemaError, Exception)
     with pytest.raises(SchemaError):
         raise SchemaError("missing column 'currency'")
+
+
+def test_catalog_build_indexes_by_id() -> None:
+    a = _make_product(id="a")
+    b = _make_product(id="b")
+    catalog = Catalog.build([a, b])
+    assert catalog.products == (a, b)  # порядок сохранён
+    assert catalog.by_id["a"] is a
+    assert catalog.by_id["b"] is b
+    assert set(catalog.by_id) == {"a", "b"}
+
+
+def test_catalog_by_id_is_read_only_mapping() -> None:
+    """by_id — MappingProxyType: запись запрещена (атомарность/иммутабельность снимка)."""
+    catalog = Catalog.build([_make_product(id="a")])
+    with pytest.raises(TypeError):
+        catalog.by_id["x"] = _make_product(id="x")  # type: ignore[index]
+
+
+def test_catalog_build_does_not_dedup() -> None:
+    """build НЕ дедупит — дедуп делает parse. Последний дубль id перетирает в by_id,
+    но в products остаются оба (документированный контракт)."""
+    first = _make_product(id="dup", name_ru="первый")
+    second = _make_product(id="dup", name_ru="второй")
+    catalog = Catalog.build([first, second])
+    assert catalog.products == (first, second)  # оба товара сохранены
+    assert catalog.by_id["dup"] is second  # by_id: последний wins (как обычный dict)
+
+
+def test_catalog_build_empty() -> None:
+    catalog = Catalog.build([])
+    assert catalog.products == ()
+    assert dict(catalog.by_id) == {}
+
+
+def test_catalog_is_frozen() -> None:
+    catalog = Catalog.build([_make_product(id="a")])
+    with pytest.raises(FrozenInstanceError):
+        catalog.products = ()  # type: ignore[misc]
