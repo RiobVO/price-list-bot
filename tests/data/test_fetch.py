@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import pytest
+from gspread.exceptions import APIError
+
 from src.data.fetch import FetchError, fetch_rows
 
 
@@ -80,3 +83,76 @@ def test_fetch_rows_returns_empty_list_for_empty_sheet() -> None:
     """Лист с заголовком, но без строк данных -> пустой list (НЕ ошибка)."""
     client = _make_client([])
     assert fetch_rows(client, "SHEET_KEY", "products") == []
+
+
+class _FakeResponse:
+    """Двойник requests.Response: только то, что читает классификатор fetch."""
+
+    def __init__(self, status_code: int, headers: dict[str, str] | None = None) -> None:
+        self.status_code = status_code
+        self.headers = headers or {}
+
+
+class _FakeAPIError(APIError):
+    """Двойник gspread.APIError без парсинга JSON-тела.
+
+    Реальный __init__ лезет в response.json() — обходим, оставляя только .response.
+    """
+
+    def __init__(self, status_code: int, headers: dict[str, str] | None = None) -> None:
+        # НЕ вызываем APIError.__init__ — он требует валидный JSON; нам нужен только .response.
+        Exception.__init__(self, f"api error {status_code}")
+        self.response = _FakeResponse(status_code, headers)  # type: ignore[assignment]
+
+
+class _RaisingWorksheet:
+    """Двойник Worksheet: get_all_records бросает заданное исключение."""
+
+    def __init__(self, exc: BaseException) -> None:
+        self._exc = exc
+
+    def get_all_records(self) -> list[dict[str, object]]:
+        raise self._exc
+
+
+def _client_raising(exc: BaseException) -> _FakeClient:
+    ws = _RaisingWorksheet(exc)
+    sheet = _FakeSpreadsheet(ws, expected_title="products")  # type: ignore[arg-type]
+    return _FakeClient(sheet, expected_key="SHEET_KEY")
+
+
+def test_fetch_rows_429_is_transient_with_retry_after() -> None:
+    """429 -> FetchError(transient=True, retry_after=float(Retry-After))."""
+    client = _client_raising(_FakeAPIError(429, {"Retry-After": "30"}))
+    with pytest.raises(FetchError) as exc_info:
+        fetch_rows(client, "SHEET_KEY", "products")
+    assert exc_info.value.transient is True
+    assert exc_info.value.retry_after == 30.0
+
+
+def test_fetch_rows_429_without_retry_after_header() -> None:
+    """429 без заголовка Retry-After -> transient=True, retry_after=None."""
+    client = _client_raising(_FakeAPIError(429))
+    with pytest.raises(FetchError) as exc_info:
+        fetch_rows(client, "SHEET_KEY", "products")
+    assert exc_info.value.transient is True
+    assert exc_info.value.retry_after is None
+
+
+@pytest.mark.parametrize("status", [401, 403, 404])
+def test_fetch_rows_auth_errors_are_non_transient(status: int) -> None:
+    """401/403/404 -> FetchError(transient=False) (main завершит процесс)."""
+    client = _client_raising(_FakeAPIError(status))
+    with pytest.raises(FetchError) as exc_info:
+        fetch_rows(client, "SHEET_KEY", "products")
+    assert exc_info.value.transient is False
+    assert exc_info.value.retry_after is None
+
+
+def test_fetch_rows_5xx_is_transient() -> None:
+    """5xx (например 500) -> FetchError(transient=True) без retry_after."""
+    client = _client_raising(_FakeAPIError(500))
+    with pytest.raises(FetchError) as exc_info:
+        fetch_rows(client, "SHEET_KEY", "products")
+    assert exc_info.value.transient is True
+    assert exc_info.value.retry_after is None
