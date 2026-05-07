@@ -4,7 +4,9 @@ from __future__ import annotations
 
 from decimal import Decimal
 
-from src.data.models import ParseResult
+import pytest
+
+from src.data.models import ParseResult, RowIssue
 from src.data.parse import parse
 from tests.fixtures import ALLOWED_CURRENCIES, DEFAULT_CURRENCY, FALLBACK_SUBCATEGORY, valid_row
 
@@ -50,3 +52,38 @@ def test_empty_optional_fields_become_none() -> None:
     assert p.desc_uz is None
     assert p.packaging is None
     assert p.photo is None
+
+
+# --- P2: battered rows ---
+
+
+@pytest.mark.parametrize("field", ["id", "category", "name_ru", "name_uz"])
+def test_empty_required_field_skips_row(field: str) -> None:
+    """Пустое обязательное поле -> строка пропущена, RowIssue(missing_required), не в каталоге."""
+    result = _parse([valid_row(**{field: ""})])
+    assert result.valid_rows == 0
+    assert result.skipped_rows == 1
+    assert result.catalog.products == ()
+    assert len(result.issues) == 1
+    issue: RowIssue = result.issues[0]
+    assert issue.reason == "missing_required"
+    assert issue.row_number == 1
+
+
+@pytest.mark.parametrize("field", ["id", "category", "name_ru", "name_uz"])
+def test_whitespace_required_field_skips_row(field: str) -> None:
+    """Whitespace-only обязательное поле трактуется как пустое -> пропуск."""
+    result = _parse([valid_row(**{field: "   "})])
+    assert result.skipped_rows == 1
+    assert result.issues[0].reason == "missing_required"
+
+
+def test_valid_and_broken_rows_mixed_counts() -> None:
+    """Смесь: 1 валидная + 1 битая -> valid=1, skipped=1, row_number битой = её позиция."""
+    rows = [valid_row(id="ok"), valid_row(id="", category="X")]
+    result = _parse(rows)
+    assert result.valid_rows == 1
+    assert result.skipped_rows == 1
+    assert result.catalog.products[0].id == "ok"
+    assert result.issues[0].row_number == 2
+    assert result.issues[0].reason == "missing_required"
