@@ -52,12 +52,37 @@ def _is_battered(row: Mapping[str, str]) -> bool:
     return any(not row.get(field, "").strip() for field in _FATAL_FIELDS)
 
 
-def _build_valid_product(row: Mapping[str, str]) -> Product:
-    """Собрать Product из нормализованной строки (skeleton: без деградаций)."""
+def _build_product(
+    row: Mapping[str, str],
+    row_number: int,
+) -> tuple[Product, list[RowIssue]]:
+    """Собрать Product из не-битой строки + деградационные RowIssue (цены)."""
+    row_issues: list[RowIssue] = []
+    product_id = row["id"].strip()
+
     price_w = parse_number(row["price_wholesale"])
+    if price_w is None:
+        row_issues.append(
+            RowIssue(
+                row_number=row_number,
+                product_id=product_id,
+                reason="bad_number",
+                detail=f"price_wholesale={row['price_wholesale']!r}",
+            )
+        )
     price_r = parse_number(row["price_retail"])
-    return Product(
-        id=row["id"].strip(),
+    if price_r is None:
+        row_issues.append(
+            RowIssue(
+                row_number=row_number,
+                product_id=product_id,
+                reason="bad_number",
+                detail=f"price_retail={row['price_retail']!r}",
+            )
+        )
+
+    product = Product(
+        id=product_id,
         category=row["category"].strip(),
         subcategory=row["subcategory"].strip(),
         name_ru=row["name_ru"].strip(),
@@ -71,6 +96,7 @@ def _build_valid_product(row: Mapping[str, str]) -> Product:
         photo=_opt(row, "photo"),
         is_active=bool(parse_bool(row["is_active"])),
     )
+    return product, row_issues
 
 
 def parse(
@@ -103,7 +129,9 @@ def parse(
                 )
             )
             continue
-        products.append(_build_valid_product(row))
+        product, row_issues = _build_product(row, row_number)
+        products.append(product)
+        issues.extend(row_issues)
 
     catalog = Catalog.build(products)
     return ParseResult(

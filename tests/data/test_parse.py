@@ -87,3 +87,31 @@ def test_valid_and_broken_rows_mixed_counts() -> None:
     assert result.catalog.products[0].id == "ok"
     assert result.issues[0].row_number == 2
     assert result.issues[0].reason == "missing_required"
+
+
+# --- P3: price degradation ---
+
+
+def test_bad_price_degrades_to_none_keeps_product() -> None:
+    """Невалидная цена -> None (цена по запросу), товар жив, RowIssue(bad_number)."""
+    result = _parse([valid_row(id="p", price_wholesale="abc")])
+    assert result.valid_rows == 1
+    assert result.skipped_rows == 0
+    p = result.catalog.products[0]
+    assert p.price_wholesale is None
+    assert p.price_retail == Decimal("15000")
+    reasons = [i.reason for i in result.issues]
+    assert reasons.count("bad_number") == 1
+    issue = next(i for i in result.issues if i.reason == "bad_number")
+    assert issue.product_id == "p"
+    assert issue.row_number == 1
+
+
+def test_both_prices_bad_two_issues_product_alive() -> None:
+    """Обе цены невалидны -> обе None, товар жив, два RowIssue(bad_number)."""
+    result = _parse([valid_row(id="p", price_wholesale="", price_retail="xx")])
+    p = result.catalog.products[0]
+    assert p.price_wholesale is None
+    assert p.price_retail is None
+    assert [i.reason for i in result.issues].count("bad_number") == 2
+    assert result.valid_rows == 1
