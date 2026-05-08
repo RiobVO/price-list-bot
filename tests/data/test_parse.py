@@ -115,3 +115,30 @@ def test_both_prices_bad_two_issues_product_alive() -> None:
     assert p.price_retail is None
     assert [i.reason for i in result.issues].count("bad_number") == 2
     assert result.valid_rows == 1
+
+
+# --- P4: currency degradation ---
+
+
+def test_empty_currency_uses_default_with_issue() -> None:
+    """Пустая currency -> default_currency + RowIssue(empty_currency)."""
+    result = _parse([valid_row(id="p", currency="")])
+    p = result.catalog.products[0]
+    assert p.currency == DEFAULT_CURRENCY
+    assert [i.reason for i in result.issues] == ["empty_currency"]
+    assert result.valid_rows == 1
+
+
+def test_unrecognized_currency_uses_default_with_issue() -> None:
+    """Непустая currency не из allowed -> default_currency + RowIssue(unrecognized_currency)."""
+    result = _parse([valid_row(id="p", currency="EUR")])
+    p = result.catalog.products[0]
+    assert p.currency == DEFAULT_CURRENCY
+    assert [i.reason for i in result.issues] == ["unrecognized_currency"]
+
+
+def test_allowed_currency_kept_no_issue() -> None:
+    """currency из allowed -> сохранена как есть, без issue."""
+    result = _parse([valid_row(id="p", currency="USD")])
+    assert result.catalog.products[0].currency == "USD"
+    assert result.issues == ()
