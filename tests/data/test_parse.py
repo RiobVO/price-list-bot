@@ -142,3 +142,29 @@ def test_allowed_currency_kept_no_issue() -> None:
     result = _parse([valid_row(id="p", currency="USD")])
     assert result.catalog.products[0].currency == "USD"
     assert result.issues == ()
+
+
+# --- P5: subcategory fallback ---
+
+
+def test_empty_subcategory_uses_fallback_with_issue() -> None:
+    """Пустая subcategory -> fallback_subcategory + RowIssue(empty_subcategory), товар жив."""
+    result = _parse([valid_row(id="p", subcategory="")])
+    p = result.catalog.products[0]
+    assert p.subcategory == FALLBACK_SUBCATEGORY
+    assert [i.reason for i in result.issues] == ["empty_subcategory"]
+    assert result.valid_rows == 1
+
+
+def test_whitespace_subcategory_uses_fallback() -> None:
+    """Whitespace-only subcategory трактуется как пустая -> fallback."""
+    result = _parse([valid_row(id="p", subcategory="   ")])
+    assert result.catalog.products[0].subcategory == FALLBACK_SUBCATEGORY
+    assert result.issues[0].reason == "empty_subcategory"
+
+
+def test_nonempty_subcategory_kept() -> None:
+    """Непустая subcategory -> как есть, без issue."""
+    result = _parse([valid_row(id="p", subcategory="Соки")])
+    assert result.catalog.products[0].subcategory == "Соки"
+    assert result.issues == ()
