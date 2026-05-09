@@ -52,6 +52,26 @@ def _is_battered(row: Mapping[str, str]) -> bool:
     return any(not row.get(field, "").strip() for field in _FATAL_FIELDS)
 
 
+def _resolve_is_active(raw: str, row_number: int, product_id: str) -> tuple[bool, RowIssue | None]:
+    """Разрешить is_active: пусто/нераспозн -> True+issue; явный bool -> значение без issue."""
+    if not raw.strip():
+        return True, RowIssue(
+            row_number=row_number,
+            product_id=product_id,
+            reason="empty_is_active",
+            detail="empty is_active -> visible",
+        )
+    parsed = parse_bool(raw)
+    if parsed is None:
+        return True, RowIssue(
+            row_number=row_number,
+            product_id=product_id,
+            reason="unrecognized_bool",
+            detail=f"is_active={raw!r} -> visible",
+        )
+    return parsed, None
+
+
 def _resolve_currency(
     raw: str,
     row_number: int,
@@ -136,6 +156,10 @@ def _build_product(
             )
         )
 
+    is_active, active_issue = _resolve_is_active(row["is_active"], row_number, product_id)
+    if active_issue is not None:
+        row_issues.append(active_issue)
+
     product = Product(
         id=product_id,
         category=row["category"].strip(),
@@ -149,7 +173,7 @@ def _build_product(
         currency=currency,
         packaging=_opt(row, "packaging"),
         photo=_opt(row, "photo"),
-        is_active=bool(parse_bool(row["is_active"])),
+        is_active=is_active,
     )
     return product, row_issues
 
