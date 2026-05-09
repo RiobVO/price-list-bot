@@ -239,3 +239,40 @@ def test_three_same_id_one_wins_two_dup() -> None:
     assert result.valid_rows == 1
     assert result.skipped_rows == 2
     assert [i.reason for i in result.issues].count("duplicate_id") == 2
+
+
+# --- P8: integration + coverage gate ---
+
+
+def test_happy_multi_row_integration() -> None:
+    """Смешанный лист: все типы ветвей -> корректные counts и каталог."""
+    rows = [
+        valid_row(id="a", category="C1", subcategory="S1"),
+        valid_row(id="b", price_retail="abc"),  # bad_number, жив
+        valid_row(id="", category="C2"),  # missing_required, пропуск
+        valid_row(id="c", currency=""),  # empty_currency, жив
+        valid_row(id="a", name_ru="Дубль"),  # duplicate_id, пропуск
+        valid_row(id="d", subcategory="", is_active=""),  # empty_subcategory + empty_is_active, жив
+    ]
+    result = _parse(rows)
+    assert result.valid_rows == 4
+    assert result.skipped_rows == 2
+    ids = [p.id for p in result.catalog.products]
+    assert ids == ["a", "b", "c", "d"]
+    reasons = sorted(i.reason for i in result.issues)
+    assert "bad_number" in reasons
+    assert "missing_required" in reasons
+    assert "empty_currency" in reasons
+    assert "duplicate_id" in reasons
+    assert "empty_subcategory" in reasons
+    assert "empty_is_active" in reasons
+    # каталог иммутабелен и by_id согласован
+    assert set(result.catalog.by_id.keys()) == {"a", "b", "c", "d"}
+    assert result.catalog.by_id["a"].category == "C1"
+
+
+def test_issue_row_numbers_are_1_based_data_index() -> None:
+    """row_number == индекс строки данных + 1 (без заголовка)."""
+    rows = [valid_row(id="ok"), valid_row(id="")]
+    result = _parse(rows)
+    assert result.issues[0].row_number == 2
