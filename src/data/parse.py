@@ -194,6 +194,7 @@ def parse(
 
     products: list[Product] = []
     issues: list[RowIssue] = []
+    seen_ids: set[str] = set()
     skipped = 0
     for index, row in enumerate(normalized):
         row_number = index + 1
@@ -215,6 +216,18 @@ def parse(
             fallback_subcategory=fallback_subcategory,
             allowed_currencies=allowed_currencies,
         )
+        if product.id in seen_ids:
+            skipped += 1
+            issues.append(
+                RowIssue(
+                    row_number=row_number,
+                    product_id=product.id,
+                    reason="duplicate_id",
+                    detail=f"id={product.id!r} already seen",
+                )
+            )
+            continue
+        seen_ids.add(product.id)
         products.append(product)
         issues.extend(row_issues)
 

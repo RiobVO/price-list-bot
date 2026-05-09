@@ -201,3 +201,41 @@ def test_explicit_true_is_active_visible_no_issue() -> None:
     result = _parse([valid_row(id="p", is_active="да")])
     assert result.catalog.products[0].is_active is True
     assert result.issues == ()
+
+
+# --- P7: dedup by id ---
+
+
+def test_duplicate_id_first_valid_wins() -> None:
+    """Дубли по id среди валидных -> первая wins, остальные -> duplicate_id, не в каталоге."""
+    rows = [valid_row(id="dup", name_ru="Первый"), valid_row(id="dup", name_ru="Второй")]
+    result = _parse(rows)
+    assert result.valid_rows == 1
+    assert result.skipped_rows == 1
+    assert len(result.catalog.products) == 1
+    assert result.catalog.products[0].name_ru == "Первый"
+    assert result.catalog.by_id["dup"].name_ru == "Первый"
+    dup_issues = [i for i in result.issues if i.reason == "duplicate_id"]
+    assert len(dup_issues) == 1
+    assert dup_issues[0].row_number == 2
+    assert dup_issues[0].product_id == "dup"
+
+
+def test_battered_first_then_valid_dup_id_valid_wins() -> None:
+    """Битая первая строка с id не участвует в dedup -> валидная вторая wins, без duplicate_id."""
+    rows = [valid_row(id="x", name_ru=""), valid_row(id="x", name_ru="Хороший")]
+    result = _parse(rows)
+    assert result.valid_rows == 1
+    assert result.catalog.products[0].name_ru == "Хороший"
+    reasons = sorted(i.reason for i in result.issues)
+    assert "missing_required" in reasons
+    assert "duplicate_id" not in reasons
+
+
+def test_three_same_id_one_wins_two_dup() -> None:
+    """Три валидные с одним id -> 1 wins, 2 duplicate_id."""
+    rows = [valid_row(id="t"), valid_row(id="t"), valid_row(id="t")]
+    result = _parse(rows)
+    assert result.valid_rows == 1
+    assert result.skipped_rows == 2
+    assert [i.reason for i in result.issues].count("duplicate_id") == 2
