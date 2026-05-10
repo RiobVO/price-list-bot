@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from decimal import Decimal
+
+import pytest
 
 from src.data.cache import CatalogCache
 from src.data.models import Catalog, ParseResult, Product
@@ -53,3 +56,99 @@ def test_cold_start_snapshot_is_empty() -> None:
 def test_get_snapshot_returns_same_reference_until_swap() -> None:
     cache = CatalogCache()
     assert cache.get_snapshot() is cache.get_snapshot()
+
+
+@pytest.mark.asyncio
+async def test_try_swap_success_sets_snapshot_with_passed_now() -> None:
+    cache = CatalogCache(min_valid_rows=1)
+    now = datetime(2026, 5, 31, 12, 0, 0, tzinfo=UTC)
+    result = _result(valid=3, skipped=0)
+
+    swapped = await cache.try_swap(result, now=now)
+
+    assert swapped is True
+    snap = cache.get_snapshot()
+    assert snap.catalog is result.catalog
+    assert snap.updated_at == now
+    assert snap.valid_rows == 3
+    assert snap.skipped_rows == 0
+
+
+@pytest.mark.asyncio
+async def test_try_swap_now_none_uses_utc() -> None:
+    cache = CatalogCache(min_valid_rows=1)
+    before = datetime.now(UTC)
+
+    swapped = await cache.try_swap(_result(valid=2, skipped=0))
+
+    after = datetime.now(UTC)
+    assert swapped is True
+    updated_at = cache.get_snapshot().updated_at
+    assert updated_at is not None
+    assert updated_at.tzinfo == UTC
+    assert before <= updated_at <= after
+
+
+@pytest.mark.asyncio
+async def test_try_swap_rejects_when_broken_ratio_above_half() -> None:
+    cache = CatalogCache(min_valid_rows=1)
+    # 2 валидных / 3 битых => 3/5 = 0.6 > 0.5 => reject, старый (пустой) снимок жив.
+    swapped = await cache.try_swap(_result(valid=2, skipped=3))
+
+    assert swapped is False
+    snap = cache.get_snapshot()
+    assert snap.catalog is None
+    assert snap.updated_at is None
+
+
+@pytest.mark.asyncio
+async def test_try_swap_accepts_when_broken_ratio_exactly_half() -> None:
+    cache = CatalogCache(min_valid_rows=1)
+    # 2 валидных / 2 битых => 2/4 = 0.5, НЕ > 0.5 => swap проходит (граница включительно).
+    swapped = await cache.try_swap(_result(valid=2, skipped=2))
+
+    assert swapped is True
+    assert cache.get_snapshot().valid_rows == 2
+
+
+@pytest.mark.asyncio
+async def test_try_swap_rejects_when_valid_below_min() -> None:
+    cache = CatalogCache(min_valid_rows=5)
+    # valid=4 < min=5 => reject даже при нулевой доле битых.
+    swapped = await cache.try_swap(_result(valid=4, skipped=0))
+
+    assert swapped is False
+    assert cache.get_snapshot().catalog is None
+
+
+@pytest.mark.asyncio
+async def test_try_swap_rejects_empty_catalog() -> None:
+    cache = CatalogCache(min_valid_rows=1)
+    # valid=0 (пустой каталог) < min=1 => reject; деления на ноль нет.
+    swapped = await cache.try_swap(_result(valid=0, skipped=0))
+
+    assert swapped is False
+    assert cache.get_snapshot().catalog is None
+
+
+@pytest.mark.asyncio
+async def test_try_swap_keeps_previous_snapshot_on_reject() -> None:
+    cache = CatalogCache(min_valid_rows=1)
+    good_now = datetime(2026, 5, 31, 10, 0, 0, tzinfo=UTC)
+    await cache.try_swap(_result(valid=5, skipped=0), now=good_now)
+
+    # Плохой снимок: доля битых 0.75 => reject, прежний валидный снимок остаётся.
+    swapped = await cache.try_swap(_result(valid=1, skipped=3))
+
+    assert swapped is False
+    snap = cache.get_snapshot()
+    assert snap.valid_rows == 5
+    assert snap.updated_at == good_now
+
+
+@pytest.mark.asyncio
+async def test_try_swap_rejects_empty_result_even_when_min_zero() -> None:
+    cache = CatalogCache(min_valid_rows=0)
+    swapped = await cache.try_swap(_result(valid=0, skipped=0))
+    assert swapped is False
+    assert cache.get_snapshot().catalog is None  # old (cold-start) snapshot alive
