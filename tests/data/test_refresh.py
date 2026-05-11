@@ -10,6 +10,7 @@ from datetime import UTC, datetime
 
 import pytest
 
+from src.data.fetch import FetchError
 from src.data.models import Catalog, ParseResult, Snapshot
 from src.data.refresh import BackoffConfig, _compute_backoff_delay, run_refresh_loop
 
@@ -163,3 +164,70 @@ async def test_happy_fetch_parse_swap_then_sleep_ttl() -> None:
     assert len(cache.swap_calls) >= 1
     assert sleeper.delays[0] == pytest.approx(300.0)  # после успешного swap -> ttl
     assert fetch_calls >= 1
+
+
+# ---------------------------------------------------------------------------
+# R3: transient FetchError
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_transient_cold_start_backoff_grows() -> None:
+    """Cold-start (catalog is None) + transient FetchError -> растущий backoff-джиттер."""
+
+    class MaxRng(random.Random):
+        def uniform(self, a: float, b: float) -> float:
+            return b
+
+    cache = FakeCache(cold_snapshot(), swap_returns=False)
+
+    async def fetch_fn() -> list[dict[str, str]]:
+        raise FetchError("503 transient", transient=True)
+
+    def parse_fn(rows: Sequence[Mapping[str, str]]) -> ParseResult:
+        raise AssertionError("parse не должен вызываться при фейле fetch")
+
+    sleeper = RecordingSleeper(stop_after=3)
+    cfg = BackoffConfig(base_s=2.0, max_s=60.0)
+
+    with pytest.raises(asyncio.CancelledError):
+        await run_refresh_loop(
+            cache,
+            fetch_fn,
+            parse_fn,
+            ttl_seconds=300.0,
+            backoff=cfg,
+            sleeper=sleeper,
+            rng=MaxRng(),
+        )
+
+    # full-jitter cap при MaxRng: attempt 0,1,2 -> 2,4,8 (растёт)
+    assert sleeper.delays == [pytest.approx(2.0), pytest.approx(4.0), pytest.approx(8.0)]
+    assert cache.swap_calls == []  # swap не звали — fetch упал
+
+
+@pytest.mark.asyncio
+async def test_transient_live_keeps_ttl() -> None:
+    """Live (catalog не None) + transient FetchError -> задержка == ttl (не backoff)."""
+    cache = FakeCache(live_snapshot(), swap_returns=False)
+
+    async def fetch_fn() -> list[dict[str, str]]:
+        raise FetchError("503 transient", transient=True)
+
+    def parse_fn(rows: Sequence[Mapping[str, str]]) -> ParseResult:
+        raise AssertionError("parse не должен вызываться")
+
+    sleeper = RecordingSleeper(stop_after=2)
+    cfg = BackoffConfig(base_s=2.0, max_s=60.0)
+
+    with pytest.raises(asyncio.CancelledError):
+        await run_refresh_loop(
+            cache,
+            fetch_fn,
+            parse_fn,
+            ttl_seconds=300.0,
+            backoff=cfg,
+            sleeper=sleeper,
+        )
+
+    assert sleeper.delays == [pytest.approx(300.0), pytest.approx(300.0)]

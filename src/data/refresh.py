@@ -10,6 +10,7 @@ from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
+from src.data.fetch import FetchError
 from src.data.models import ParseResult
 
 if TYPE_CHECKING:
@@ -51,12 +52,24 @@ async def run_refresh_loop(
     добавляются в последующих задачах.
     """
     rng = rng if rng is not None else random.Random()
+    attempt = 0
     while True:
         started = time.monotonic()
-        rows = await fetch_fn()
-        result = parse_fn(rows)
+        try:
+            rows = await fetch_fn()
+            result = parse_fn(rows)
+        except FetchError:
+            # transient: cold-start (нет снимка) -> backoff; live -> держим ttl
+            if cache.get_snapshot().catalog is None:
+                delay = _compute_backoff_delay(attempt, backoff, rng)
+                attempt += 1
+            else:
+                delay = ttl_seconds
+            await sleeper(delay)
+            continue
         swapped = await cache.try_swap(result)
         if swapped:
+            attempt = 0
             duration_ms = (time.monotonic() - started) * 1000.0
             logger.info(
                 "refresh_done",
