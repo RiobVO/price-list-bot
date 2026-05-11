@@ -2,8 +2,20 @@
 
 from __future__ import annotations
 
+import asyncio
+import logging
 import random
+import time
+from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
+
+from src.data.models import ParseResult
+
+if TYPE_CHECKING:
+    from src.data.cache import CatalogCache
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True, slots=True)
@@ -21,3 +33,40 @@ def _compute_backoff_delay(attempt: int, backoff: BackoffConfig, rng: random.Ran
     """
     cap = min(backoff.max_s, backoff.base_s * (2**attempt))
     return rng.uniform(0.0, cap)
+
+
+async def run_refresh_loop(
+    cache: CatalogCache,
+    fetch_fn: Callable[[], Awaitable[list[dict[str, str]]]],
+    parse_fn: Callable[[Sequence[Mapping[str, str]]], ParseResult],
+    ttl_seconds: float,
+    backoff: BackoffConfig,
+    *,
+    sleeper: Callable[[float], Awaitable[None]] = asyncio.sleep,
+    rng: random.Random | None = None,
+) -> None:
+    """Фоновый цикл обновления каталога.
+
+    Happy path: fetch -> parse -> try_swap -> sleep(ttl). Ветви ошибок
+    добавляются в последующих задачах.
+    """
+    rng = rng if rng is not None else random.Random()
+    while True:
+        started = time.monotonic()
+        rows = await fetch_fn()
+        result = parse_fn(rows)
+        swapped = await cache.try_swap(result)
+        if swapped:
+            duration_ms = (time.monotonic() - started) * 1000.0
+            logger.info(
+                "refresh_done",
+                extra={
+                    "rows_total": result.valid_rows + result.skipped_rows,
+                    "valid": result.valid_rows,
+                    "skipped": result.skipped_rows,
+                    "duration_ms": duration_ms,
+                    "snapshot_age_s": 0.0,
+                    "schema_ok": True,
+                },
+            )
+        await sleeper(ttl_seconds)
