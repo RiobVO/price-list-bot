@@ -58,11 +58,15 @@ async def run_refresh_loop(
         try:
             rows = await fetch_fn()
             result = parse_fn(rows)
-        except FetchError:
-            # transient: cold-start (нет снимка) -> backoff; live -> держим ttl
+        except FetchError as exc:
+            if not exc.transient:
+                raise  # non-transient: main ловит -> error + exit(1)
             if cache.get_snapshot().catalog is None:
-                delay = _compute_backoff_delay(attempt, backoff, rng)
-                attempt += 1
+                if exc.retry_after is not None:
+                    delay = exc.retry_after  # 429: уважаем заголовок Retry-After
+                else:
+                    delay = _compute_backoff_delay(attempt, backoff, rng)
+                    attempt += 1
             else:
                 delay = ttl_seconds
             await sleeper(delay)

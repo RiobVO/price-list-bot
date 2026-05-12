@@ -231,3 +231,68 @@ async def test_transient_live_keeps_ttl() -> None:
         )
 
     assert sleeper.delays == [pytest.approx(300.0), pytest.approx(300.0)]
+
+
+# ---------------------------------------------------------------------------
+# R4: non-transient propagates + 429 retry_after
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_non_transient_fetch_error_propagates() -> None:
+    """non-transient FetchError (401/битый creds) -> не ловится, поднимается наружу."""
+    cache = FakeCache(cold_snapshot(), swap_returns=False)
+
+    async def fetch_fn() -> list[dict[str, str]]:
+        raise FetchError("401 unauthorized", transient=False)
+
+    def parse_fn(rows: Sequence[Mapping[str, str]]) -> ParseResult:
+        raise AssertionError("не вызывается")
+
+    sleeper = RecordingSleeper(stop_after=99)  # не должен сработать
+    cfg = BackoffConfig(base_s=2.0, max_s=60.0)
+
+    with pytest.raises(FetchError) as ei:
+        await run_refresh_loop(
+            cache,
+            fetch_fn,
+            parse_fn,
+            ttl_seconds=300.0,
+            backoff=cfg,
+            sleeper=sleeper,
+        )
+    assert ei.value.transient is False
+    assert sleeper.delays == []  # ни одной задержки — сразу проброс
+
+
+@pytest.mark.asyncio
+async def test_429_retry_after_is_respected_over_jitter() -> None:
+    """429: transient + retry_after задан -> delay == retry_after (НЕ джиттер-backoff)."""
+
+    class MaxRng(random.Random):
+        def uniform(self, a: float, b: float) -> float:
+            return b  # если бы взяли джиттер — было бы != 7.5
+
+    cache = FakeCache(cold_snapshot(), swap_returns=False)
+
+    async def fetch_fn() -> list[dict[str, str]]:
+        raise FetchError("429 rate limited", transient=True, retry_after=7.5)
+
+    def parse_fn(rows: Sequence[Mapping[str, str]]) -> ParseResult:
+        raise AssertionError("не вызывается")
+
+    sleeper = RecordingSleeper(stop_after=2)
+    cfg = BackoffConfig(base_s=2.0, max_s=60.0)
+
+    with pytest.raises(asyncio.CancelledError):
+        await run_refresh_loop(
+            cache,
+            fetch_fn,
+            parse_fn,
+            ttl_seconds=300.0,
+            backoff=cfg,
+            sleeper=sleeper,
+            rng=MaxRng(),
+        )
+
+    assert sleeper.delays == [pytest.approx(7.5), pytest.approx(7.5)]
