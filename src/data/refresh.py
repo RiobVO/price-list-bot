@@ -11,7 +11,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from src.data.fetch import FetchError
-from src.data.models import ParseResult
+from src.data.models import ParseResult, SchemaError
 
 if TYPE_CHECKING:
     from src.data.cache import CatalogCache
@@ -67,6 +67,15 @@ async def run_refresh_loop(
                 else:
                     delay = _compute_backoff_delay(attempt, backoff, rng)
                     attempt += 1
+            else:
+                delay = ttl_seconds
+            await sleeper(delay)
+            continue
+        except SchemaError:
+            # битая схема: частичный снимок не кладём. live -> keep+ttl; cold -> backoff
+            if cache.get_snapshot().catalog is None:
+                delay = _compute_backoff_delay(attempt, backoff, rng)
+                attempt += 1
             else:
                 delay = ttl_seconds
             await sleeper(delay)

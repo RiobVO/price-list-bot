@@ -11,7 +11,7 @@ from datetime import UTC, datetime
 import pytest
 
 from src.data.fetch import FetchError
-from src.data.models import Catalog, ParseResult, Snapshot
+from src.data.models import Catalog, ParseResult, SchemaError, Snapshot
 from src.data.refresh import BackoffConfig, _compute_backoff_delay, run_refresh_loop
 
 
@@ -296,3 +296,70 @@ async def test_429_retry_after_is_respected_over_jitter() -> None:
         )
 
     assert sleeper.delays == [pytest.approx(7.5), pytest.approx(7.5)]
+
+
+# ---------------------------------------------------------------------------
+# R5: SchemaError
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_schema_error_live_keeps_snapshot_and_sleeps_ttl() -> None:
+    """SchemaError при живом каталоге -> снимок держим, try_swap НЕ зван, sleep(ttl)."""
+    cache = FakeCache(live_snapshot(), swap_returns=False)
+
+    async def fetch_fn() -> list[dict[str, str]]:
+        return [{"name_ru": "x"}]  # нет required колонки -> parse бросит SchemaError
+
+    def parse_fn(rows: Sequence[Mapping[str, str]]) -> ParseResult:
+        raise SchemaError("missing required column: id")
+
+    sleeper = RecordingSleeper(stop_after=2)
+    cfg = BackoffConfig(base_s=2.0, max_s=60.0)
+
+    with pytest.raises(asyncio.CancelledError):
+        await run_refresh_loop(
+            cache,
+            fetch_fn,
+            parse_fn,
+            ttl_seconds=300.0,
+            backoff=cfg,
+            sleeper=sleeper,
+        )
+
+    assert cache.swap_calls == []  # частичный/битый снимок в кэш не кладём
+    assert sleeper.delays == [pytest.approx(300.0), pytest.approx(300.0)]
+
+
+@pytest.mark.asyncio
+async def test_schema_error_cold_uses_backoff() -> None:
+    """SchemaError на cold-start (нет снимка) -> backoff (как transient cold)."""
+
+    class MaxRng(random.Random):
+        def uniform(self, a: float, b: float) -> float:
+            return b
+
+    cache = FakeCache(cold_snapshot(), swap_returns=False)
+
+    async def fetch_fn() -> list[dict[str, str]]:
+        return [{"name_ru": "x"}]
+
+    def parse_fn(rows: Sequence[Mapping[str, str]]) -> ParseResult:
+        raise SchemaError("missing required column: id")
+
+    sleeper = RecordingSleeper(stop_after=2)
+    cfg = BackoffConfig(base_s=2.0, max_s=60.0)
+
+    with pytest.raises(asyncio.CancelledError):
+        await run_refresh_loop(
+            cache,
+            fetch_fn,
+            parse_fn,
+            ttl_seconds=300.0,
+            backoff=cfg,
+            sleeper=sleeper,
+            rng=MaxRng(),
+        )
+
+    assert cache.swap_calls == []
+    assert sleeper.delays == [pytest.approx(2.0), pytest.approx(4.0)]
