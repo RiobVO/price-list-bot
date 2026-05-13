@@ -8,6 +8,7 @@ import random
 import time
 from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
 from src.data.fetch import FetchError
@@ -85,6 +86,9 @@ async def run_refresh_loop(
         swapped = await cache.try_swap(result)
         if swapped:
             attempt = 0
+            snap = cache.get_snapshot()
+            now = datetime.now(UTC)
+            age_s = (now - snap.updated_at).total_seconds() if snap.updated_at is not None else 0.0
             duration_ms = (time.monotonic() - started) * 1000.0
             logger.info(
                 "refresh_done",
@@ -93,7 +97,7 @@ async def run_refresh_loop(
                     "valid": result.valid_rows,
                     "skipped": result.skipped_rows,
                     "duration_ms": duration_ms,
-                    "snapshot_age_s": 0.0,
+                    "snapshot_age_s": age_s,
                     "schema_ok": True,
                 },
             )
