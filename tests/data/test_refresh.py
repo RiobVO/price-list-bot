@@ -363,3 +363,39 @@ async def test_schema_error_cold_uses_backoff() -> None:
 
     assert cache.swap_calls == []
     assert sleeper.delays == [pytest.approx(2.0), pytest.approx(4.0)]
+
+
+# ---------------------------------------------------------------------------
+# R6: CancelledError пробрасывается (контрактный тест, see honesty note in plan)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_cancelled_error_from_fetch_propagates() -> None:
+    """CancelledError (отмена во время fetch) пробрасывается, НЕ уходит в backoff."""
+    cache = FakeCache(cold_snapshot(), swap_returns=False)
+    fetch_calls = 0
+
+    async def fetch_fn() -> list[dict[str, str]]:
+        nonlocal fetch_calls
+        fetch_calls += 1
+        raise asyncio.CancelledError
+
+    def parse_fn(rows: Sequence[Mapping[str, str]]) -> ParseResult:
+        raise AssertionError("не вызывается")
+
+    sleeper = RecordingSleeper(stop_after=99)
+    cfg = BackoffConfig(base_s=2.0, max_s=60.0)
+
+    with pytest.raises(asyncio.CancelledError):
+        await run_refresh_loop(
+            cache,
+            fetch_fn,
+            parse_fn,
+            ttl_seconds=300.0,
+            backoff=cfg,
+            sleeper=sleeper,
+        )
+
+    assert fetch_calls == 1  # отмена на первом fetch, без повторов
+    assert sleeper.delays == []  # backoff не сработал
