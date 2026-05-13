@@ -399,3 +399,48 @@ async def test_cancelled_error_from_fetch_propagates() -> None:
 
     assert fetch_calls == 1  # отмена на первом fetch, без повторов
     assert sleeper.delays == []  # backoff не сработал
+
+
+# ---------------------------------------------------------------------------
+# R7: refresh_done лог с обязательными полями (контрактный тест, see honesty note)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_refresh_done_logged_with_required_fields(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """После успешного swap логируется refresh_done со всеми полями summary."""
+    import logging as _logging
+
+    cache = FakeCache(cold_snapshot(), swap_returns=True)
+
+    async def fetch_fn() -> list[dict[str, str]]:
+        return [{"id": "1"}]
+
+    def parse_fn(rows: Sequence[Mapping[str, str]]) -> ParseResult:
+        return make_parse_result(valid=7, skipped=2)
+
+    sleeper = RecordingSleeper(stop_after=1)
+    cfg = BackoffConfig(base_s=2.0, max_s=60.0)
+
+    with caplog.at_level(_logging.INFO, logger="src.data.refresh"):
+        with pytest.raises(asyncio.CancelledError):
+            await run_refresh_loop(
+                cache,
+                fetch_fn,
+                parse_fn,
+                ttl_seconds=300.0,
+                backoff=cfg,
+                sleeper=sleeper,
+            )
+
+    recs = [r for r in caplog.records if r.message == "refresh_done"]
+    assert len(recs) == 1
+    rec = recs[0]
+    assert rec.rows_total == 9
+    assert rec.valid == 7
+    assert rec.skipped == 2
+    assert rec.schema_ok is True
+    assert isinstance(rec.duration_ms, float)
+    assert rec.snapshot_age_s >= 0.0
