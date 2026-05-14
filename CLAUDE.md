@@ -84,3 +84,27 @@ config.py      — pydantic-settings, всё из env
 
 TDD, начиная со слоя `data` (каркас всего). **Первый артефакт — падающий тест `parse` на фикстуре строк**,
 затем парсер. Значимые решения — ADR (`docs/adr/NNNN-title.md`, формат Nygard) по ходу, не задним числом.
+
+---
+
+## Статус (2026-06-01)
+
+Слой **`data` готов и запушен** (`main` → github.com/RiobVO/price-list-bot): `models, coerce, fetch,
+config, parse, cache, refresh`. 166 тестов зелёные; `ruff` + `ruff format` + `mypy --strict` чисто;
+`coerce`/`parse` — 100% покрытие. Контракты типов на стыках — `docs/superpowers/specs/...design.md` §8.
+План слоя — `docs/superpowers/plans/2026-05-31-data-layer.md`.
+
+Дальше по серии: **`services`** (план ещё НЕ написан) → `bot` → `infra`. `services` — единственный мост
+бот↔кэш: навигация категория→подкатегория, поиск + узбекская нормализация, пагинация (`PAGE_SIZE`),
+формат цены/валюты для показа, протухание `callback`-id. Читает кэш через `CatalogCache.get_snapshot()`
+(синхронно, без сети), работает с иммутабельным `Snapshot`/`Catalog` из `src/data/models.py`.
+
+Уточнения, всплывшие при реализации `data` (оспоримы, не из брифа — учесть в `services`/ревью):
+- **Кэш не свапает пустой снимок:** `valid+skipped==0` → `try_swap` возвращает `False`, старый снимок жив.
+  «Валидный пустой каталог» (§Фаза 0) относится к парсингу; в кэш пустой `ParseResult` не кладётся.
+- **Коллизия заголовков:** две колонки с одинаковым нормализованным именем (strip+lower) в
+  `parse.normalize_headers` → молча побеждает последняя, без `RowIssue` (known limitation, не покрыто).
+- **`Catalog(...)` напрямую** принимает обычный dict — иммутабельность `by_id` гарантируется только через
+  `Catalog.build`; нет `__post_init__`-guard.
+- **Старт-валидация конфига:** нет проверки `DEFAULT_CURRENCY ∈ allowed_currencies()` и нижних границ у
+  `*_BACKOFF_*_S`/`SHUTDOWN_TIMEOUT_S` (см. `ДОПУЩЕНИЕ` по конфигу).
