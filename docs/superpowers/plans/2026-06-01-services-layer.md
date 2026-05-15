@@ -33,9 +33,28 @@ mypy --strict; pytest asyncio_mode=strict; coverage source=src), пакеты `s
 
 Команды кроссплатформенны, запускать из корня `E:\ADEL`. Где `python` недоступен — `py`.
 
-## Правки ревью (применить при исполнении)
+## Правки ревью
 
-_Заполняется после двойного adversarial-ревью (согласованность типов + полнота/TDD)._
+План прошёл двойное adversarial-ревью (согласованность типов + полнота/TDD). Оба вердикта — CHANGES
+REQUESTED; правки применены инлайн в план/спеку:
+
+- **Спека §4/§141:** сигнатура `product_card(product, lang)` — лимит caption это Telegram-константа
+  (1024/4096 по `photo`), не конфиг-параметр. (Ревьюер-1 предлагал param — отклонено как over-engineering.)
+- **Task 6.4:** исправлен ассерт обрезки (многоточие в среднем сегменте `desc`, не в конце текста).
+- **Task 3.1:** добавлен тест `len(callback) ≤ 64` байта на длинных UZ-именах (§10, инвариант CLAUDE.md).
+- **Task 4.1:** `get_text(lang: str)` — убрана зависимость `locales → services.models` (инверсия слоёв).
+  Уточнён честный Red (`cannot import name 'get_text'`).
+- **Task 1.1:** `test_stale` заменён с тавтологии на проверку value-equality.
+- **Task 2.1:** добавлены кросс-скрипт кейсы диграфов `yu/ya/ng/sh`.
+- **Task 7.1:** добавлены тесты единственной группы «Прочее» и коллизии хешей (покрывает error-ветку
+  `_register`).
+- **Tasks 2.1/3.1/9.4:** добавлены шаги создания ADR (0007/0006/0012) с коммитами.
+- **Task 6.2:** ревьюер счёл negative-ветку `format_price` мёртвой — **отклонено** (проверено: `parse_number`
+  принимает `-N`, ветка достижима И нужна для верной группировки разрядов); вместо удаления добавлен тест
+  на отрицательную цену.
+
+Остаточные known-limitations (осознанно не закрываются тестами): вырожденный caption (имя+цены > лимита);
+фасадные обёртки clamp/пустоты не дублируют ядро отдельными тестами (тонкое делегирование).
 
 ---
 
@@ -80,9 +99,9 @@ def test_ok_is_frozen() -> None:
         ok.value = 2  # type: ignore[misc]
 
 
-def test_stale_is_singleton_like_marker() -> None:
-    """Stale — пустой маркер протухания; два экземпляра равны по типу."""
-    assert isinstance(Stale(), Stale)
+def test_stale_instances_are_value_equal() -> None:
+    """Stale — пустой frozen-маркер протухания: два экземпляра равны по значению."""
+    assert Stale() == Stale()
 ```
 
 - [ ] **Run & verify FAIL** — `python -m pytest tests/services/test_models.py -q`
@@ -282,6 +301,10 @@ from src.services.normalize import normalize
         ("qand", "қанд"),          # q ↔ қ
         ("halqa", "ҳалқа"),        # h ↔ ҳ (и q↔қ)
         ("yongʻoq", "ёнғоқ"),      # ё→yo, нғ→ngʻ→ng..., қ→q
+        ("yulduz", "юлдуз"),       # диграф yu ↔ ю
+        ("yangi", "янги"),         # диграф ya ↔ я
+        ("shamol", "шамол"),       # диграф sh ↔ ш
+        ("tong", "тонг"),          # ng (н+г) ↔ нг
     ],
 )
 def test_uz_cross_script_canonical_equal(latin: str, cyrillic: str) -> None:
@@ -372,6 +395,8 @@ def normalize(text: str, lang: Lang) -> str:
 
 - [ ] **Commit** — `git add src/services/normalize.py tests/services/test_normalize.py && git commit -m "feat(services): add UZ-aware text normalization (cyrillic/latin + apostrophes)"`
 
+- [ ] **ADR** — создать `docs/adr/0007-uz-normalization-table.md` (Nygard, Статус `Accepted`). Решение: единый канон-латиница, явная таблица кириллица→латиница + унификация апострофов, диграфы до одиночных букв; ru — короткий путь. Альтернатива (отвергнута): «замена пары символов». Коммит: `git add docs/adr/0007-uz-normalization-table.md && git commit -m "docs(adr): record UZ normalization table approach"`
+
 ---
 
 # Группа задач 3: src/services/ids.py
@@ -425,6 +450,18 @@ def test_pair_id_differs_from_bare_subcategory() -> None:
 
 def test_different_inputs_give_different_ids() -> None:
     assert group_id("Напитки") != group_id("Еда")
+
+
+def test_worst_case_callback_within_64_bytes() -> None:
+    """Худший callback p:<prod>:<sub>:<page> из 12-hex id влезает в лимит Telegram (64 байта).
+
+    Длинное UZ-имя категории не раздувает id (хеш фикс. длины) — инвариант callback_data ≤ 64.
+    """
+    long_uz = "узоқ номли категория " * 5
+    prod = group_id("очень-длинный-идентификатор-товара-из-таблицы")
+    sub = group_id(long_uz, "подкатегория")
+    callback = f"p:{prod}:{sub}:9999"
+    assert len(callback.encode("utf-8")) <= 64
 ```
 
 - [ ] **Run & verify FAIL** — `python -m pytest tests/services/test_ids.py -q`
@@ -469,6 +506,8 @@ def group_id(*parts: str) -> str:
   Expected: без ошибок.
 
 - [ ] **Commit** — `git add src/services/ids.py tests/services/test_ids.py && git commit -m "feat(services): add stable blake2s group id for callback data"`
+
+- [ ] **ADR** — создать `docs/adr/0006-callback-id-strategy.md` (формат Nygard: Статус `Accepted` / Контекст / Решение / Последствия / Альтернативы). Решение: blake2s 12-hex для категории/подкатегории/товара; подкатегория от пары `(category, subcategory)`; протухание через `ViewResult.Stale`; коллизия хешей — known limitation с error-логом. Коммит: `git add docs/adr/0006-callback-id-strategy.md && git commit -m "docs(adr): record callback id hashing strategy"`
 
 ---
 
@@ -521,7 +560,7 @@ def test_get_text_unknown_key_without_default_raises() -> None:
 ```
 
 - [ ] **Run & verify FAIL** — `python -m pytest tests/services/test_locales.py -q`
-  Expected: `ImportError: cannot import name 'get_text' from 'src.locales'` (или `ModuleNotFoundError` на `ru`/`uz`) — символ/модуль из нашего пакета отсутствует.
+  Expected: `ImportError: cannot import name 'get_text' from 'src.locales'` — пакет `src/locales/__init__.py` уже существует (scaffold), но `get_text` в нём ещё нет; импорт первой строки теста падает именно на этом символе (честный Red).
 
 - [ ] **Minimal CORRECT impl** — `src/locales/ru.py`:
 
@@ -556,16 +595,19 @@ TEXTS: dict[str, str] = {
 `src/locales/__init__.py` (заменить содержимое целиком):
 
 ```python
-"""i18n-реестр: get_text(key, lang) с инвариантом равенства ключей ru/uz."""
+"""i18n-реестр: get_text(key, lang) с инвариантом равенства ключей ru/uz.
+
+lang типизирован как str (не services.models.Lang): locales — отдельный слой,
+не должен зависеть от services. Вызывающий передаёт Lang (подтип str).
+"""
 from __future__ import annotations
 
 from src.locales import ru, uz
-from src.services.models import Lang
 
 _TABLES: dict[str, dict[str, str]] = {"ru": ru.TEXTS, "uz": uz.TEXTS}
 
 
-def get_text(key: str, lang: Lang, default: str | None = None) -> str:
+def get_text(key: str, lang: str, default: str | None = None) -> str:
     """Локализованная строка по ключу. Неизвестный ключ → default или KeyError."""
     table = _TABLES[lang]
     if key in table:
@@ -835,6 +877,11 @@ def test_format_price_short_number_no_separator() -> None:
 
 def test_format_price_unknown_currency_falls_back_to_code() -> None:
     assert format_price(Decimal("100"), "USD", "ru") == "100 USD"
+
+
+def test_format_price_negative_groups_without_sign_in_thousands() -> None:
+    """Отрицательная цена (parse_number принимает '-N'): знак вне группировки разрядов."""
+    assert format_price(Decimal("-120000"), "UZS", "ru") == f"-120{NBSP}000 сум"
 ```
 
 - [ ] **Run & verify FAIL** — `python -m pytest tests/services/test_formatting.py -q`
@@ -851,10 +898,8 @@ from __future__ import annotations
 
 from decimal import Decimal
 
-from src.data.models import Product
 from src.locales import get_text
-from src.services.ids import group_id
-from src.services.models import Lang, ProductCard, ProductListItem
+from src.services.models import Lang
 
 _THOUSANDS_SEP = " "  # неразрывный пробел
 
@@ -879,6 +924,8 @@ def format_price(value: Decimal | None, currency: str, lang: Lang) -> str:
         return get_text("price_on_request", lang)
     symbol = get_text(f"currency.{currency}", lang, default=currency)
     text = format(value, "f")
+    # Знак снимается ДО группировки тысяч, иначе "-" попадёт в разряд (−120000 → −1 120 000).
+    # parse_number принимает отрицательные ("-5" → Decimal("-5")), поэтому ветка достижима.
     negative = text.startswith("-")
     if negative:
         text = text[1:]
@@ -894,8 +941,7 @@ def format_price(value: Decimal | None, currency: str, lang: Lang) -> str:
   Expected: зелёные.
 
 - [ ] **Lint/type green** — `ruff check src/services/formatting.py tests/services/test_formatting.py && ruff format --check src/services/formatting.py tests/services/test_formatting.py && mypy --strict src/services/formatting.py tests/services/test_formatting.py`
-  Expected: без ошибок. (`Product`, `group_id`, `ProductCard`, `ProductListItem` импортированы для следующих подзадач — если ruff F401 ругается, перенести их импорт в подзадачу-потребитель; см. примечание.)
-  Примечание: чтобы не держать неиспользуемые импорты, добавляй `Product/group_id/ProductCard/ProductListItem` в импорт ровно в той подзадаче, где появляется потребитель. На шаге 6.2 в импорте оставь только реально используемое (`Decimal`, `get_text`, `Lang`).
+  Expected: без ошибок. Импорт минимален (`Decimal`, `get_text`, `Lang`) — символы `Product`/`group_id`/`ProductListItem`/`ProductCard` добавляются в импорт в подзадачах-потребителях 6.3/6.4, чтобы не держать неиспользуемые импорты (ruff F401).
 
 - [ ] **Commit** — `git add src/services/formatting.py tests/services/test_formatting.py && git commit -m "feat(services): add localized price formatting"`
 
@@ -1010,8 +1056,11 @@ def test_product_card_truncates_desc_to_photo_limit(make_product: Callable[..., 
     card = product_card(p, "ru")
     assert card.photo == "http://example.com/a.jpg"
     assert len(card.text) <= 1024
-    assert card.text.rstrip().endswith("…")
-    # цены не срезаны — присутствуют после обрезанного описания
+    # структура: title \n\n desc \n\n tail; обрезается ТОЛЬКО desc (средний сегмент)
+    segments = card.text.split("\n\n")
+    assert segments[1].rstrip().endswith("…")
+    # имя и цены не срезаны — присутствуют целиком после обрезанного описания
+    assert segments[0] == "Сок"
     assert "Опт: 100 сум" in card.text
 
 
@@ -1051,6 +1100,8 @@ def product_card(product: Product, lang: Lang) -> ProductCard:
 
     Лимит caption = 1024 при наличии фото, иначе 4096 (лимит сообщения). При
     превышении обрезается ТОЛЬКО описание — имя и цены не режутся.
+    Known limitation: вырожденный случай (само имя+цены > лимита) не клампится —
+    имена коротки по контракту данных.
     """
     title = localized_name(product, lang)
     desc = localized_desc(product, lang)
@@ -1106,7 +1157,10 @@ def product_card(product: Product, lang: Lang) -> ProductCard:
 """Тесты двухуровневого индекса: сборка, active-only, порядок, обратные карты."""
 from __future__ import annotations
 
+import logging
 from collections.abc import Callable
+
+import pytest
 
 from src.data.models import Catalog, Product
 from src.services.ids import group_id
@@ -1204,6 +1258,37 @@ def test_product_lookup_by_hashed_id(make_product: Callable[..., Product]) -> No
     assert found is not None
     assert found.id == "abc"
     assert index.product("missingidxxx") is None
+
+
+def test_single_other_subcategory_navigates(make_product: Callable[..., Product]) -> None:
+    """Единственная группа «Прочее»: обычная двухуровневая навигация, без авто-схлопывания."""
+    products = [make_product(id="1", category="Напитки", subcategory="Прочее", name_ru="Сок")]
+    index = CatalogIndex.build(_catalog(products))
+    assert len(index.categories) == 1
+    subs = index.subcategories(group_id("Напитки"))
+    assert subs is not None
+    assert [s.title for s in subs] == ["Прочее"]
+    prods = index.products(group_id("Напитки", "Прочее"))
+    assert prods is not None
+    assert len(prods) == 1
+
+
+def test_hash_collision_keeps_first_and_logs_error(
+    make_product: Callable[..., Product],
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Коллизия хеша (разные имена → один id) логируется error, первый wins (known limitation)."""
+    monkeypatch.setattr("src.services.index.group_id", lambda *parts: "collide12hash")
+    products = [
+        make_product(id="1", category="Напитки", subcategory="Соки"),
+        make_product(id="2", category="Еда", subcategory="Хлеб"),
+    ]
+    with caplog.at_level(logging.ERROR):
+        index = CatalogIndex.build(_catalog(products))
+    assert any("collision" in record.message for record in caplog.records)
+    # первый wins: единственная категория несёт title первого товара
+    assert [c.title for c in index.categories] == ["Напитки"]
 ```
 
 - [ ] **Run & verify FAIL** — `python -m pytest tests/services/test_index.py -q`
@@ -1568,20 +1653,8 @@ from __future__ import annotations
 from src.config import Settings
 from src.data.cache import CatalogCache
 from src.data.models import Snapshot
-from src.services.formatting import product_card, product_list_item
 from src.services.index import CatalogIndex
-from src.services.models import (
-    CategoryItem,
-    Lang,
-    Ok,
-    Page,
-    ProductCard,
-    ProductListItem,
-    Stale,
-    SubcategoryItem,
-)
-from src.services.pagination import paginate
-from src.services.search import search
+from src.services.models import CategoryItem
 
 
 class CatalogService:
@@ -1594,11 +1667,17 @@ class CatalogService:
         self._cached_index: CatalogIndex | None = None
 
     def _index(self) -> CatalogIndex:
-        """Индекс текущего снимка; строится один раз на снимок (мемоизация по identity)."""
+        """Индекс текущего снимка; строится один раз на снимок (мемоизация по identity).
+
+        Ранний возврат локальной переменной в ветке пересборки — иначе mypy не сузит
+        атрибут _cached_index до non-None.
+        """
         snapshot = self._cache.get_snapshot()
         if snapshot is not self._cached_snapshot or self._cached_index is None:
-            self._cached_index = CatalogIndex.build(snapshot.catalog)
+            index = CatalogIndex.build(snapshot.catalog)
+            self._cached_index = index
             self._cached_snapshot = snapshot
+            return index
         return self._cached_index
 
     def categories(self) -> tuple[CategoryItem, ...]:
@@ -1610,8 +1689,7 @@ class CatalogService:
   Expected: зелёные.
 
 - [ ] **Lint/type green** — `ruff check src/services/catalog.py tests/services/test_catalog_service.py && ruff format --check src/services/catalog.py tests/services/test_catalog_service.py && mypy --strict src/services/catalog.py tests/services/test_catalog_service.py`
-  Expected: без ошибок. (`product_card`, `product_list_item`, `Ok`, `Page`, `ProductCard`, `ProductListItem`, `Stale`, `SubcategoryItem`, `paginate`, `search` импортированы для подзадач 9.2–9.4; если ruff F401 — добавляй их в импорт в подзадаче-потребителе.)
-  Примечание: на шаге 9.1 в импорте оставь только используемое (`Settings`, `CatalogCache`, `Snapshot`, `CatalogIndex`, `CategoryItem`). Остальные символы добавляются в 9.2–9.4.
+  Expected: без ошибок. Импорт минимален (`Settings`, `CatalogCache`, `Snapshot`, `CatalogIndex`, `CategoryItem`). Символы для методов 9.2–9.4 (`Lang`, `Ok`, `Stale`, `Page`, `SubcategoryItem`, `ProductListItem`, `ProductCard`, `product_list_item`, `product_card`, `paginate`, `search`) добавляются в импорт в соответствующих подзадачах.
 
 - [ ] **Commit** — `git add src/services/catalog.py tests/services/test_catalog_service.py && git commit -m "feat(services): add CatalogService facade with snapshot-memoized index"`
 
@@ -1664,7 +1742,7 @@ async def test_product_page_unknown_is_stale() -> None:
 - [ ] **Run & verify FAIL** — `python -m pytest tests/services/test_catalog_service.py -q`
   Expected: `AttributeError: 'CatalogService' object has no attribute 'subcategories'` (метод ещё не реализован — честный Red).
 
-- [ ] **Minimal CORRECT impl** — добавить методы в класс `CatalogService` (и расширить импорт: `Ok`, `Stale`, `SubcategoryItem`, `Page`, `ProductListItem`, `product_list_item`, `paginate`):
+- [ ] **Minimal CORRECT impl** — добавить методы в класс `CatalogService`. Расширить импорты в шапке `catalog.py`: к `from src.services.models import CategoryItem` добавить `Lang, Ok, Page, ProductListItem, Stale, SubcategoryItem`; добавить `from src.services.formatting import product_list_item` и `from src.services.pagination import paginate`:
 
 ```python
     def subcategories(self, cat_id: str) -> Ok[tuple[SubcategoryItem, ...]] | Stale:
@@ -1722,7 +1800,7 @@ async def test_product_card_unknown_is_stale() -> None:
 - [ ] **Run & verify FAIL** — `python -m pytest tests/services/test_catalog_service.py -q`
   Expected: `AttributeError: 'CatalogService' object has no attribute 'product_card'`.
 
-- [ ] **Minimal CORRECT impl** — добавить метод в `CatalogService` (и расширить импорт: `ProductCard`, `product_card`):
+- [ ] **Minimal CORRECT impl** — добавить метод в `CatalogService`. Расширить импорты: добавить `ProductCard` к `from src.services.models import ...` и `product_card` к `from src.services.formatting import ...`:
 
 ```python
     def product_card(self, prod_id: str, lang: Lang) -> Ok[ProductCard] | Stale:
@@ -1772,7 +1850,7 @@ async def test_search_empty_on_cold_start() -> None:
 - [ ] **Run & verify FAIL** — `python -m pytest tests/services/test_catalog_service.py -q`
   Expected: `AttributeError: 'CatalogService' object has no attribute 'search'`.
 
-- [ ] **Minimal CORRECT impl** — добавить метод в `CatalogService` (и расширить импорт: `search`):
+- [ ] **Minimal CORRECT impl** — добавить метод в `CatalogService`. Расширить импорты: добавить `from src.services.search import search` (имя `search` не конфликтует — метод класса и функция модуля в разных пространствах):
 
 ```python
     def search(self, query: str, lang: Lang, page: int) -> Page[ProductListItem]:
@@ -1787,6 +1865,8 @@ async def test_search_empty_on_cold_start() -> None:
   Expected: без ошибок.
 
 - [ ] **Commit** — `git add src/services/catalog.py tests/services/test_catalog_service.py && git commit -m "feat(services): add search delegation on facade"`
+
+- [ ] **ADR** — создать `docs/adr/0012-services-view-boundary.md` (Nygard, Статус `Accepted`). Решение: `services` отдаёт презентационно-готовые view-модели + `ViewResult(Ok/Stale)`, `bot` тонкий; чистое ядро над `Catalog` + cache-aware фасад (снимок 1×/запрос, мемо по identity). Альтернатива (отвергнута): отдавать сырые `Product`, форматировать в `bot`. Коммит: `git add docs/adr/0012-services-view-boundary.md && git commit -m "docs(adr): record services view-model boundary"`
 
 ---
 

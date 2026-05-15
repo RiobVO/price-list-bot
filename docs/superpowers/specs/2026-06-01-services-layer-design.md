@@ -111,7 +111,7 @@ ids.group_id(*parts: str) -> str                    # blake2s(normalize-join(par
 normalize.normalize(text: str, lang: Lang) -> str   # lower+trim+collapse; uz: латиница↔кириллица+апостроф
 pagination.paginate(items: Sequence[T], page: int, page_size: int) -> Page[T]   # page 1-based, clamp
 formatting.format_price(value: Decimal | None, currency: str, lang: Lang) -> str # None → «цена по запросу»
-formatting.product_card(product: Product, lang: Lang, page_size_limit: int) -> ProductCard
+formatting.product_card(product: Product, lang: Lang) -> ProductCard  # лимит caption — Telegram-константа, по photo
 search.search(index: CatalogIndex, query: str, lang: Lang, page: int, page_size: int) -> Page[ProductListItem]
 
 class CatalogIndex:                                 # чистая сборка над Catalog (active-only, table order)
@@ -138,9 +138,11 @@ class LanguageStore:
     def set(self, user_id: int, lang: Lang) -> None
 ```
 
-`PAGE_SIZE` и лимит caption фасад берёт из `Settings`; ядро (`paginate`, `product_card`) принимает их
-параметром — остаётся чистым. `page_size_limit` для caption — 1024 при наличии фото, иначе 4096
-(обрезается только `desc`, цены/имя не режутся).
+`PAGE_SIZE` фасад берёт из `Settings` и прокидывает в `paginate` параметром (ядро остаётся чистым).
+Лимит caption — **протокольная Telegram-константа**, не конфиг: 1024 при наличии фото, иначе 4096
+(лимит сообщения). `product_card` выбирает лимит детерминированно по `product.photo` (модульные
+константы), обрезается только `desc`, цены/имя не режутся. Дегенеративный случай (само имя+цены > лимита)
+— known limitation: имена коротки по контракту данных, отдельно не клампится.
 
 ---
 
