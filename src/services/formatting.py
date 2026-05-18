@@ -7,8 +7,10 @@ from __future__ import annotations
 
 from decimal import Decimal
 
+from src.data.models import Product
 from src.locales import get_text
-from src.services.models import Lang
+from src.services.ids import group_id
+from src.services.models import Lang, ProductListItem
 
 _THOUSANDS_SEP = " "  # неразрывный пробел
 
@@ -44,3 +46,22 @@ def format_price(value: Decimal | None, currency: str, lang: Lang) -> str:
     if negative:
         rendered = f"-{rendered}"
     return f"{rendered} {symbol}"
+
+
+def localized_name(product: Product, lang: Lang) -> str:
+    """Имя на выбранном языке; пустое → фолбэк на второй (data гарантирует непустые)."""
+    primary = product.name_ru if lang == "ru" else product.name_uz
+    secondary = product.name_uz if lang == "ru" else product.name_ru
+    return primary or secondary
+
+
+def localized_desc(product: Product, lang: Lang) -> str | None:
+    """Описание на выбранном языке; пустое → фолбэк на второй; оба пусты → None."""
+    primary = product.desc_ru if lang == "ru" else product.desc_uz
+    secondary = product.desc_uz if lang == "ru" else product.desc_ru
+    return primary or secondary or None
+
+
+def product_list_item(product: Product, lang: Lang) -> ProductListItem:
+    """Строка списка: хеш-id товара + локализованное имя."""
+    return ProductListItem(id=group_id(product.id), title=localized_name(product, lang))
