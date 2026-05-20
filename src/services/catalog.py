@@ -11,8 +11,18 @@ from __future__ import annotations
 from src.config import Settings
 from src.data.cache import CatalogCache
 from src.data.models import Snapshot
+from src.services.formatting import product_list_item
 from src.services.index import CatalogIndex as CatalogIndex
-from src.services.models import CategoryItem
+from src.services.models import (
+    CategoryItem,
+    Lang,
+    Ok,
+    Page,
+    ProductListItem,
+    Stale,
+    SubcategoryItem,
+)
+from src.services.pagination import paginate
 
 
 class CatalogService:
@@ -41,3 +51,16 @@ class CatalogService:
     def categories(self) -> tuple[CategoryItem, ...]:
         """Категории меню. Пусто → cold-start/деградация (UX «каталог обновляется»)."""
         return self._index().categories
+
+    def subcategories(self, cat_id: str) -> Ok[tuple[SubcategoryItem, ...]] | Stale:
+        """Подкатегории категории. Неизвестный cat_id → Stale (протух)."""
+        subs = self._index().subcategories(cat_id)
+        return Stale() if subs is None else Ok(subs)
+
+    def product_page(self, sub_id: str, page: int, lang: Lang) -> Ok[Page[ProductListItem]] | Stale:
+        """Страница товаров подкатегории. Неизвестный sub_id → Stale; page клампится."""
+        products = self._index().products(sub_id)
+        if products is None:
+            return Stale()
+        items = [product_list_item(product, lang) for product in products]
+        return Ok(paginate(items, page, self._page_size))

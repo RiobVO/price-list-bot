@@ -10,6 +10,8 @@ from src.data.cache import CatalogCache
 from src.data.models import Catalog, ParseResult, Product
 from src.services import catalog as catalog_module
 from src.services.catalog import CatalogService
+from src.services.ids import group_id
+from src.services.models import Ok, Stale
 
 
 class _Settings:
@@ -75,3 +77,42 @@ async def test_index_rebuilt_after_snapshot_swap(
     assert [c.title for c in service.categories()] == ["A"]
     await cache.try_swap(_result([make_product(id="2", category="B", subcategory="Y")]))
     assert [c.title for c in service.categories()] == ["B"]
+
+
+@pytest.mark.asyncio
+async def test_subcategories_ok(make_product: Callable[..., Product]) -> None:
+    cache = CatalogCache()
+    await cache.try_swap(_result([make_product(id="1", category="Напитки", subcategory="Соки")]))
+    service = _service(cache)
+    result = service.subcategories(group_id("Напитки"))
+    assert isinstance(result, Ok)
+    assert [s.title for s in result.value] == ["Соки"]
+
+
+@pytest.mark.asyncio
+async def test_subcategories_unknown_is_stale() -> None:
+    service = _service(CatalogCache())
+    assert isinstance(service.subcategories("deadbeefdead"), Stale)
+
+
+@pytest.mark.asyncio
+async def test_product_page_ok(make_product: Callable[..., Product]) -> None:
+    cache = CatalogCache()
+    await cache.try_swap(
+        _result(
+            [
+                make_product(id="1", category="Напитки", subcategory="Соки", name_ru="Сок"),
+            ]
+        )
+    )
+    service = _service(cache)
+    result = service.product_page(group_id("Напитки", "Соки"), 1, "ru")
+    assert isinstance(result, Ok)
+    assert [i.title for i in result.value.items] == ["Сок"]
+    assert result.value.items[0].id == group_id("1")
+
+
+@pytest.mark.asyncio
+async def test_product_page_unknown_is_stale() -> None:
+    service = _service(CatalogCache())
+    assert isinstance(service.product_page("missingsubxx", 1, "ru"), Stale)
