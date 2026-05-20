@@ -11,13 +11,14 @@ from __future__ import annotations
 from src.config import Settings
 from src.data.cache import CatalogCache
 from src.data.models import Snapshot
-from src.services.formatting import product_list_item
+from src.services.formatting import product_card, product_list_item
 from src.services.index import CatalogIndex as CatalogIndex
 from src.services.models import (
     CategoryItem,
     Lang,
     Ok,
     Page,
+    ProductCard,
     ProductListItem,
     Stale,
     SubcategoryItem,
@@ -64,3 +65,8 @@ class CatalogService:
             return Stale()
         items = [product_list_item(product, lang) for product in products]
         return Ok(paginate(items, page, self._page_size))
+
+    def product_card(self, prod_id: str, lang: Lang) -> Ok[ProductCard] | Stale:
+        """Карточка товара по хеш-id. Неизвестный prod_id → Stale (протух)."""
+        product = self._index().product(prod_id)
+        return Stale() if product is None else Ok(product_card(product, lang))
