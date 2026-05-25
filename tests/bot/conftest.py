@@ -10,8 +10,18 @@ from typing import Any
 from unittest.mock import AsyncMock
 
 import pytest
+from aiogram.types import Message
 
 from src.services.models import Page
+
+
+def _fake_message(text: str | None = None, user_id: int = 1) -> AsyncMock:
+    """AsyncMock, проходящий isinstance(Message), с свободными атрибутами."""
+    msg = AsyncMock()
+    msg.__class__ = Message  # type: ignore[assignment]  # isinstance(msg, Message) → True
+    msg.text = text
+    msg.from_user.id = user_id
+    return msg
 
 
 @pytest.fixture
@@ -36,7 +46,7 @@ def make_callback() -> Callable[..., AsyncMock]:
         cb = AsyncMock()
         cb.data = data
         cb.from_user.id = user_id
-        cb.message = AsyncMock()
+        cb.message = _fake_message(user_id=user_id)
         return cb
 
     return _make
@@ -45,10 +55,7 @@ def make_callback() -> Callable[..., AsyncMock]:
 @pytest.fixture
 def make_message() -> Callable[..., AsyncMock]:
     def _make(text: str = "", user_id: int = 1) -> AsyncMock:
-        msg = AsyncMock()
-        msg.text = text
-        msg.from_user.id = user_id
-        return msg
+        return _fake_message(text=text, user_id=user_id)
 
     return _make
 

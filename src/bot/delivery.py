@@ -7,28 +7,20 @@
 from __future__ import annotations
 
 import logging
-from typing import Any, Protocol
 
 from aiogram.exceptions import TelegramAPIError
-from aiogram.types import InlineKeyboardMarkup
+from aiogram.types import InlineKeyboardMarkup, Message
 
 from src.services.models import ProductCard
 
 logger = logging.getLogger(__name__)
 
 
-class _CardTarget(Protocol):
-    """Объект, умеющий отправлять сообщение/фото (Message)."""
-
-    async def answer(self, text: str, **kwargs: Any) -> Any: ...
-    async def answer_photo(self, photo: str, **kwargs: Any) -> Any: ...
-
-
 async def send_product_card(
-    target: _CardTarget,
+    target: Message,
     card: ProductCard,
     *,
-    markup: InlineKeyboardMarkup | str | None,
+    markup: InlineKeyboardMarkup | None,
 ) -> None:
     """Отправить карточку. С фото — answer_photo; битое фото → текст + warning."""
     if card.photo is not None:
