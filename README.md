@@ -25,6 +25,13 @@ make install          # pip install -e ".[dev]"
 make run              # python -m src.main
 ```
 
+### Демо без Google (нужен только токен)
+
+Чтобы пощупать бота без сервис-аккаунта и таблицы — в `.env` укажите `BOT_TOKEN` и `USE_SAMPLE_CATALOG=true`,
+затем `make run`. Каталог берётся из встроенного примера `src/data/sample.py`; фоновое обновление и
+обращения к Google отключены. Для боевого режима верните `USE_SAMPLE_CATALOG=false` и настройте доступ к
+таблице (ниже).
+
 ---
 
 ## Google service-account и доступ к таблице

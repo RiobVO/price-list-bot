@@ -28,11 +28,17 @@ from src.data.fetch import FetchError, fetch_rows
 from src.data.models import ParseResult
 from src.data.parse import parse
 from src.data.refresh import BackoffConfig, run_refresh_loop
+from src.data.sample import SAMPLE_ROWS
 from src.logging_setup import setup_logging
 from src.services.catalog import CatalogService
 from src.services.language import LanguageStore
 
 logger = logging.getLogger(__name__)
+
+
+async def _idle() -> None:
+    """Бесконечное ожидание: заглушка refresh-task в демо-режиме (гасится при shutdown)."""
+    await asyncio.Event().wait()
 
 
 def build_parse_fn(
@@ -99,19 +105,25 @@ async def shutdown(refresh_task: asyncio.Task[None], bot: Bot) -> None:
 async def run(settings: Settings) -> None:
     """Поднять бота: кэш + refresh-task + dispatcher + транспорт + graceful shutdown."""
     setup_logging(level=settings.LOG_LEVEL, fmt=settings.LOG_FORMAT)
-    client = build_gspread_client(settings)
     cache = CatalogCache(min_valid_rows=settings.MIN_VALID_ROWS)
     service = CatalogService(cache, settings)
     lang_store = LanguageStore()
-
-    fetch_fn = build_fetch_fn(client, settings)
     parse_fn = build_parse_fn(settings)
-    backoff = BackoffConfig(
-        base_s=settings.COLD_START_BACKOFF_BASE_S, max_s=settings.COLD_START_BACKOFF_MAX_S
-    )
-    refresh_task: asyncio.Task[None] = asyncio.create_task(
-        run_refresh_loop(cache, fetch_fn, parse_fn, settings.CACHE_TTL_SECONDS, backoff)
-    )
+
+    if settings.USE_SAMPLE_CATALOG:
+        # Демо: засеять кэш встроенным примером, без Google Sheets и без refresh-loop.
+        logger.info("sample_catalog_mode")
+        await cache.try_swap(parse_fn(SAMPLE_ROWS))
+        refresh_task: asyncio.Task[None] = asyncio.create_task(_idle())
+    else:
+        client = build_gspread_client(settings)
+        fetch_fn = build_fetch_fn(client, settings)
+        backoff = BackoffConfig(
+            base_s=settings.COLD_START_BACKOFF_BASE_S, max_s=settings.COLD_START_BACKOFF_MAX_S
+        )
+        refresh_task = asyncio.create_task(
+            run_refresh_loop(cache, fetch_fn, parse_fn, settings.CACHE_TTL_SECONDS, backoff)
+        )
 
     bot = Bot(settings.BOT_TOKEN.get_secret_value())
     dp = build_dispatcher(service, lang_store, settings)
