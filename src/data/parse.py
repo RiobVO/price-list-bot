@@ -84,9 +84,10 @@ def _build_product(
     row_number: int,
     *,
     default_currency: str,
+    fallback_subcategory: str,
     allowed_currencies: frozenset[str],
 ) -> tuple[Product, list[RowIssue]]:
-    """Собрать Product из не-битой строки + деградационные RowIssue (цены, валюта)."""
+    """Собрать Product из не-битой строки + деградационные RowIssue."""
     row_issues: list[RowIssue] = []
     product_id = row["id"].strip()
 
@@ -121,10 +122,24 @@ def _build_product(
     if currency_issue is not None:
         row_issues.append(currency_issue)
 
+    subcategory_raw = row["subcategory"].strip()
+    if subcategory_raw:
+        subcategory = subcategory_raw
+    else:
+        subcategory = fallback_subcategory
+        row_issues.append(
+            RowIssue(
+                row_number=row_number,
+                product_id=product_id,
+                reason="empty_subcategory",
+                detail="empty subcategory -> fallback",
+            )
+        )
+
     product = Product(
         id=product_id,
         category=row["category"].strip(),
-        subcategory=row["subcategory"].strip(),
+        subcategory=subcategory,
         name_ru=row["name_ru"].strip(),
         name_uz=row["name_uz"].strip(),
         desc_ru=_opt(row, "desc_ru"),
@@ -173,6 +188,7 @@ def parse(
             row,
             row_number,
             default_currency=default_currency,
+            fallback_subcategory=fallback_subcategory,
             allowed_currencies=allowed_currencies,
         )
         products.append(product)
