@@ -25,6 +25,8 @@ _REQUIRED_COLUMNS: Final[frozenset[str]] = frozenset(
 # Опциональные: если колонки нет -> поле None, без ошибки.
 _OPTIONAL_COLUMNS: Final[frozenset[str]] = frozenset({"desc_ru", "desc_uz", "packaging", "photo"})
 
+_FATAL_FIELDS: Final[tuple[str, ...]] = ("id", "category", "name_ru", "name_uz")
+
 
 def normalize_headers(row: Mapping[str, str]) -> dict[str, str]:
     """Нормализовать ключи (strip+lower). Лишние колонки остаются (игнор позже)."""
@@ -43,6 +45,11 @@ def _opt(row: Mapping[str, str], key: str) -> str | None:
     """Опциональное строковое поле: пусто/whitespace -> None, иначе strip-значение."""
     value = row.get(key, "").strip()
     return value or None
+
+
+def _is_battered(row: Mapping[str, str]) -> bool:
+    """Строка фатально битая, если любое из id/category/name_ru/name_uz пусто."""
+    return any(not row.get(field, "").strip() for field in _FATAL_FIELDS)
 
 
 def _build_valid_product(row: Mapping[str, str]) -> Product:
@@ -82,14 +89,26 @@ def parse(
 
     products: list[Product] = []
     issues: list[RowIssue] = []
-    for row in normalized:
-        product = _build_valid_product(row)
-        products.append(product)
+    skipped = 0
+    for index, row in enumerate(normalized):
+        row_number = index + 1
+        if _is_battered(row):
+            skipped += 1
+            issues.append(
+                RowIssue(
+                    row_number=row_number,
+                    product_id=(row.get("id") or "").strip() or None,
+                    reason="missing_required",
+                    detail="empty id/category/name_ru/name_uz",
+                )
+            )
+            continue
+        products.append(_build_valid_product(row))
 
     catalog = Catalog.build(products)
     return ParseResult(
         catalog=catalog,
         issues=tuple(issues),
         valid_rows=len(products),
-        skipped_rows=len(normalized) - len(products),
+        skipped_rows=skipped,
     )
