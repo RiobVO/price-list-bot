@@ -127,3 +127,27 @@ def test_frozen_immutable() -> None:
     settings = _make()
     with pytest.raises(ValidationError):
         settings.SHEET_NAME = "other"
+
+
+def test_allowed_currencies_single() -> None:
+    """Дефолтный CURRENCIES='UZS' -> frozenset из одного элемента."""
+    settings = _make()
+    assert settings.allowed_currencies() == frozenset({"UZS"})
+
+
+def test_allowed_currencies_multi_with_spaces() -> None:
+    """CSV с пробелами и регистром -> upper + strip, пустые элементы отброшены."""
+    settings = _make(CURRENCIES=" uzs , USD ,eur, ")
+    assert settings.allowed_currencies() == frozenset({"UZS", "USD", "EUR"})
+
+
+def test_allowed_currencies_returns_frozenset() -> None:
+    """Результат — frozenset (иммутабелен), не set/list."""
+    settings = _make()
+    assert isinstance(settings.allowed_currencies(), frozenset)
+
+
+def test_allowed_currencies_dedup() -> None:
+    """Повторяющиеся валюты схлопываются."""
+    settings = _make(CURRENCIES="UZS,uzs,UZS")
+    assert settings.allowed_currencies() == frozenset({"UZS"})
