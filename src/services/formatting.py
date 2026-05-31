@@ -10,7 +10,7 @@ from decimal import Decimal
 from src.data.models import Product
 from src.locales import get_text
 from src.services.ids import group_id
-from src.services.models import Lang, ProductListItem
+from src.services.models import Lang, ProductCard, ProductListItem
 
 _THOUSANDS_SEP = " "  # неразрывный пробел
 
@@ -65,3 +65,51 @@ def localized_desc(product: Product, lang: Lang) -> str | None:
 def product_list_item(product: Product, lang: Lang) -> ProductListItem:
     """Строка списка: хеш-id товара + локализованное имя."""
     return ProductListItem(id=group_id(product.id), title=localized_name(product, lang))
+
+
+_CAPTION_LIMIT_WITH_PHOTO = 1024
+_CAPTION_LIMIT_TEXT = 4096
+_ELLIPSIS = "…"
+
+
+def _truncate(text: str, budget: int) -> str:
+    """Обрезать text под budget символов по границе слова + многоточие."""
+    if budget <= 0:
+        return ""
+    if len(text) <= budget:
+        return text
+    hard = text[: budget - len(_ELLIPSIS)].rstrip()
+    cut = hard.rsplit(" ", 1)[0] if " " in hard else hard
+    return f"{cut}{_ELLIPSIS}"
+
+
+def product_card(product: Product, lang: Lang) -> ProductCard:
+    """Собрать карточку: имя + (фолбэк) описание + опт/розница + фасовка.
+
+    Лимит caption = 1024 при наличии фото, иначе 4096 (лимит сообщения). При
+    превышении обрезается ТОЛЬКО описание — имя и цены не режутся.
+    Known limitation: вырожденный случай (само имя+цены > лимита) не клампится —
+    имена коротки по контракту данных.
+    """
+    title = localized_name(product, lang)
+    desc = localized_desc(product, lang)
+
+    tail_lines = [
+        f"{get_text('label_wholesale', lang)}: "
+        f"{format_price(product.price_wholesale, product.currency, lang)}",
+        f"{get_text('label_retail', lang)}: "
+        f"{format_price(product.price_retail, product.currency, lang)}",
+    ]
+    if product.packaging:
+        tail_lines.append(f"{get_text('label_packaging', lang)}: {product.packaging}")
+    tail = "\n".join(tail_lines)
+
+    limit = _CAPTION_LIMIT_WITH_PHOTO if product.photo else _CAPTION_LIMIT_TEXT
+    if not desc:
+        text = f"{title}\n\n{tail}"
+    else:
+        # фиксированная часть = title + 4 перевода строки + tail; остаток — под desc
+        fixed_len = len(title) + 4 + len(tail)
+        desc = _truncate(desc, limit - fixed_len)
+        text = f"{title}\n\n{desc}\n\n{tail}"
+    return ProductCard(text=text, photo=product.photo)
