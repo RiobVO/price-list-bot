@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import pytest
+import requests
 from gspread.exceptions import APIError
 
 from src.data.fetch import FetchError, fetch_rows
@@ -156,3 +157,20 @@ def test_fetch_rows_5xx_is_transient() -> None:
         fetch_rows(client, "SHEET_KEY", "products")
     assert exc_info.value.transient is True
     assert exc_info.value.retry_after is None
+
+
+def test_fetch_rows_network_error_is_transient() -> None:
+    """Сетевой сбой (requests.ConnectionError) -> FetchError(transient=True)."""
+    client = _client_raising(requests.exceptions.ConnectionError("conn reset"))
+    with pytest.raises(FetchError) as exc_info:
+        fetch_rows(client, "SHEET_KEY", "products")
+    assert exc_info.value.transient is True
+    assert exc_info.value.retry_after is None
+
+
+def test_fetch_rows_timeout_is_transient() -> None:
+    """Таймаут (requests.Timeout) -> FetchError(transient=True)."""
+    client = _client_raising(requests.exceptions.Timeout("read timed out"))
+    with pytest.raises(FetchError) as exc_info:
+        fetch_rows(client, "SHEET_KEY", "products")
+    assert exc_info.value.transient is True

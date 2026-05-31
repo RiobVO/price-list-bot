@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from typing import Any
 
+import requests
 from gspread.exceptions import APIError
 
 
@@ -73,4 +74,7 @@ def fetch_rows(client: object, spreadsheet_id: str, worksheet_name: str) -> list
         records: list[dict[str, Any]] = worksheet.get_all_records()
     except APIError as exc:
         raise _classify_api_error(exc) from exc
+    except requests.exceptions.RequestException as exc:
+        # Сеть/таймаут на стороне requests — всегда временный сбой: refresh уйдёт в backoff.
+        raise FetchError(f"network error: {exc}", transient=True) from exc
     return [{key: _cell_to_str(value) for key, value in record.items()} for record in records]
