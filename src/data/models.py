@@ -5,8 +5,10 @@ Category/Subcategory здесь НЕТ — это навигационные vie
 
 from __future__ import annotations
 
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from decimal import Decimal
+from types import MappingProxyType
 
 
 @dataclass(frozen=True, slots=True)
@@ -42,3 +44,21 @@ class RowIssue:
 
 class SchemaError(Exception):
     """Битая схема: rows непуст, но отсутствует обязательная колонка. parse() БРОСАЕТ это."""
+
+
+@dataclass(frozen=True, slots=True)
+class Catalog:
+    """Иммутабельный каталог: кортеж товаров + read-only индекс by_id.
+
+    build НЕ выполняет дедупликацию — это ответственность parse(). При дублях id
+    в by_id попадает последний товар (поведение dict), products сохраняет все.
+    """
+
+    products: tuple[Product, ...]
+    by_id: Mapping[str, Product]  # MappingProxyType, неизменяемый
+
+    @classmethod
+    def build(cls, products: Iterable[Product]) -> Catalog:
+        items = tuple(products)
+        index = MappingProxyType({p.id: p for p in items})
+        return cls(products=items, by_id=index)
