@@ -11,7 +11,7 @@ from src.data.models import Catalog, ParseResult, Product
 from src.services import catalog as catalog_module
 from src.services.catalog import CatalogService
 from src.services.ids import group_id
-from src.services.models import Ok, Stale
+from src.services.models import Ok, ProductCard, Stale
 
 
 class _Settings:
@@ -116,3 +116,20 @@ async def test_product_page_ok(make_product: Callable[..., Product]) -> None:
 async def test_product_page_unknown_is_stale() -> None:
     service = _service(CatalogCache())
     assert isinstance(service.product_page("missingsubxx", 1, "ru"), Stale)
+
+
+@pytest.mark.asyncio
+async def test_product_card_ok(make_product: Callable[..., Product]) -> None:
+    cache = CatalogCache()
+    await cache.try_swap(_result([make_product(id="1", name_ru="Сок")]))
+    service = _service(cache)
+    result = service.product_card(group_id("1"), "ru")
+    assert isinstance(result, Ok)
+    assert isinstance(result.value, ProductCard)
+    assert "Сок" in result.value.text
+
+
+@pytest.mark.asyncio
+async def test_product_card_unknown_is_stale() -> None:
+    service = _service(CatalogCache())
+    assert isinstance(service.product_card("missingprodx", "ru"), Stale)
