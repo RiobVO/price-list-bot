@@ -168,3 +168,36 @@ def test_nonempty_subcategory_kept() -> None:
     result = _parse([valid_row(id="p", subcategory="Соки")])
     assert result.catalog.products[0].subcategory == "Соки"
     assert result.issues == ()
+
+
+# --- P6: is_active degradation ---
+
+
+def test_empty_is_active_visible_with_issue() -> None:
+    """Пустое is_active -> товар ВИДЕН (True) + RowIssue(empty_is_active)."""
+    result = _parse([valid_row(id="p", is_active="")])
+    p = result.catalog.products[0]
+    assert p.is_active is True
+    assert [i.reason for i in result.issues] == ["empty_is_active"]
+
+
+def test_unrecognized_is_active_visible_with_issue() -> None:
+    """Нераспознанное непустое is_active -> ВИДЕН (True) + RowIssue(unrecognized_bool)."""
+    result = _parse([valid_row(id="p", is_active="maybe")])
+    p = result.catalog.products[0]
+    assert p.is_active is True
+    assert [i.reason for i in result.issues] == ["unrecognized_bool"]
+
+
+def test_explicit_false_is_active_hidden_no_issue() -> None:
+    """Явный FALSE -> скрыт (is_active False), без issue."""
+    result = _parse([valid_row(id="p", is_active="false")])
+    assert result.catalog.products[0].is_active is False
+    assert result.issues == ()
+
+
+def test_explicit_true_is_active_visible_no_issue() -> None:
+    """Явный TRUE -> видим, без issue."""
+    result = _parse([valid_row(id="p", is_active="да")])
+    assert result.catalog.products[0].is_active is True
+    assert result.issues == ()
