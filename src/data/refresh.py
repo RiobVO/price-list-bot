@@ -58,6 +58,8 @@ async def run_refresh_loop(
         try:
             rows = await fetch_fn()
             result = parse_fn(rows)
+        except asyncio.CancelledError:
+            raise  # отмена refresh-task при shutdown — пробрасываем (except ВЫШЕ FetchError)
         except FetchError as exc:
             if not exc.transient:
                 raise  # non-transient: main ловит -> error + exit(1)
