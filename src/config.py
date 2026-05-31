@@ -60,3 +60,9 @@ class Settings(BaseSettings):
                 "exactly one of GOOGLE_APPLICATION_CREDENTIALS / GOOGLE_CREDENTIALS_B64 must be set"
             )
         return self
+
+    def allowed_currencies(self) -> frozenset[str]:
+        """Разрешённые валюты из CSV CURRENCIES (upper+strip, пустые отброшены)."""
+        return frozenset(
+            token.strip().upper() for token in self.CURRENCIES.split(",") if token.strip()
+        )
