@@ -133,3 +133,26 @@ async def test_product_card_ok(make_product: Callable[..., Product]) -> None:
 async def test_product_card_unknown_is_stale() -> None:
     service = _service(CatalogCache())
     assert isinstance(service.product_card("missingprodx", "ru"), Stale)
+
+
+@pytest.mark.asyncio
+async def test_search_returns_page(make_product: Callable[..., Product]) -> None:
+    cache = CatalogCache()
+    await cache.try_swap(
+        _result(
+            [
+                make_product(id="1", name_ru="Сок яблочный"),
+                make_product(id="2", name_ru="Вода"),
+            ]
+        )
+    )
+    service = _service(cache)
+    page = service.search("яблоч", "ru", 1)
+    assert [i.title for i in page.items] == ["Сок яблочный"]
+
+
+@pytest.mark.asyncio
+async def test_search_empty_on_cold_start() -> None:
+    service = _service(CatalogCache())
+    page = service.search("сок", "ru", 1)
+    assert page.items == ()

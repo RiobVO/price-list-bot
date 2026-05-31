@@ -24,6 +24,7 @@ from src.services.models import (
     SubcategoryItem,
 )
 from src.services.pagination import paginate
+from src.services.search import search
 
 
 class CatalogService:
@@ -70,3 +71,7 @@ class CatalogService:
         """Карточка товара по хеш-id. Неизвестный prod_id → Stale (протух)."""
         product = self._index().product(prod_id)
         return Stale() if product is None else Ok(product_card(product, lang))
+
+    def search(self, query: str, lang: Lang, page: int) -> Page[ProductListItem]:
+        """Подстрочный поиск по активным товарам. Без id → без Stale; пусто → пустой Page."""
+        return search(self._index(), query, lang, page, self._page_size)
