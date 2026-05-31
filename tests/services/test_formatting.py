@@ -116,3 +116,13 @@ def test_product_card_without_photo_uses_text_limit(make_product: Callable[..., 
     assert card.photo is None
     assert len(card.text) <= 4096
     assert "Опт: 100 сум" in card.text
+
+
+def test_product_card_drops_desc_block_when_no_budget(make_product: Callable[..., Product]) -> None:
+    """Имя длиннее лимита: описание опускается целиком, без пустого сегмента \\n\\n\\n\\n."""
+    long_name = "Имя " * 400  # имя само превышает лимит фото
+    p = make_product(name_ru=long_name, desc_ru="Описание", photo="http://example.com/a.jpg")
+    card = product_card(p, "ru")
+    assert "\n\n\n\n" not in card.text
+    # последний блок — цены (tail), описание опущено
+    assert card.text.split("\n\n")[-1].startswith("Опт:")
