@@ -7,6 +7,7 @@ from __future__ import annotations
 
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
+from datetime import datetime
 from decimal import Decimal
 from types import MappingProxyType
 
@@ -62,3 +63,23 @@ class Catalog:
         items = tuple(products)
         index = MappingProxyType({p.id: p for p in items})
         return cls(products=items, by_id=index)
+
+
+@dataclass(frozen=True, slots=True)
+class ParseResult:
+    """Результат parse(): каталог (НЕ Optional, пустой при 0 валидных) + замечания + счётчики."""
+
+    catalog: Catalog
+    issues: tuple[RowIssue, ...]
+    valid_rows: int
+    skipped_rows: int
+
+
+@dataclass(frozen=True, slots=True)
+class Snapshot:
+    """Снимок в кэше. catalog/updated_at=None до первого валидного снимка (cold-start)."""
+
+    catalog: Catalog | None
+    updated_at: datetime | None
+    valid_rows: int
+    skipped_rows: int
