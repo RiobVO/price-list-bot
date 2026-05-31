@@ -1,4 +1,5 @@
 """Проверка инвариантов каркаса: дерево каталогов и пакеты-маркеры на месте."""
+
 from __future__ import annotations
 
 from pathlib import Path

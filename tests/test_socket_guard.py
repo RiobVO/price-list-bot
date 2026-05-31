@@ -1,4 +1,5 @@
 """Проверка socket-guard: реальная сеть запрещена, монипуляция не ломает offline-логику."""
+
 from __future__ import annotations
 
 import socket
