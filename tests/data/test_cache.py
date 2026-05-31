@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from datetime import UTC, datetime
 from decimal import Decimal
 
@@ -152,3 +153,46 @@ async def test_try_swap_rejects_empty_result_even_when_min_zero() -> None:
     swapped = await cache.try_swap(_result(valid=0, skipped=0))
     assert swapped is False
     assert cache.get_snapshot().catalog is None  # old (cold-start) snapshot alive
+
+
+@pytest.mark.asyncio
+async def test_try_swap_is_single_flight_serialized() -> None:
+    cache = CatalogCache(min_valid_rows=1)
+
+    concurrent = 0
+    max_concurrent = 0
+    enter_gate = asyncio.Event()  # держит первую корутину внутри секции
+    first_inside = asyncio.Event()  # сигнал, что кто-то уже в секции
+
+    async def hook() -> None:
+        nonlocal concurrent, max_concurrent
+        concurrent += 1
+        max_concurrent = max(max_concurrent, concurrent)
+        if not first_inside.is_set():
+            # Первая вошедшая корутина застревает в секции, давая шанс второй
+            # войти параллельно, ЕСЛИ сериализации (Lock) нет.
+            first_inside.set()
+            await enter_gate.wait()
+        concurrent -= 1
+
+    # Внедряем наблюдаемый хук в критическую секцию try_swap.
+    cache._on_enter_critical = hook
+
+    async def opener() -> bool:
+        return await cache.try_swap(_result(valid=3, skipped=0))
+
+    task_a = asyncio.create_task(opener())
+    task_b = asyncio.create_task(opener())
+
+    # Дать первой корутине войти в секцию и застрять на enter_gate.
+    await first_inside.wait()
+    # Дать второй корутине шанс войти (если Lock есть — она ждёт снаружи).
+    await asyncio.sleep(0.05)
+    # Отпустить первую — обе завершатся.
+    enter_gate.set()
+
+    results = await asyncio.gather(task_a, task_b)
+
+    assert list(results) == [True, True]
+    # Под Lock одновременно внутри секции только одна корутина.
+    assert max_concurrent == 1
