@@ -52,11 +52,41 @@ def _is_battered(row: Mapping[str, str]) -> bool:
     return any(not row.get(field, "").strip() for field in _FATAL_FIELDS)
 
 
+def _resolve_currency(
+    raw: str,
+    row_number: int,
+    product_id: str,
+    *,
+    default_currency: str,
+    allowed_currencies: frozenset[str],
+) -> tuple[str, RowIssue | None]:
+    """Пусто -> default+empty_currency; не из allowed -> default+unrecognized; иначе как есть."""
+    value = raw.strip()
+    if not value:
+        return default_currency, RowIssue(
+            row_number=row_number,
+            product_id=product_id,
+            reason="empty_currency",
+            detail="empty currency -> default",
+        )
+    if value not in allowed_currencies:
+        return default_currency, RowIssue(
+            row_number=row_number,
+            product_id=product_id,
+            reason="unrecognized_currency",
+            detail=f"currency={value!r} not in allowed",
+        )
+    return value, None
+
+
 def _build_product(
     row: Mapping[str, str],
     row_number: int,
+    *,
+    default_currency: str,
+    allowed_currencies: frozenset[str],
 ) -> tuple[Product, list[RowIssue]]:
-    """Собрать Product из не-битой строки + деградационные RowIssue (цены)."""
+    """Собрать Product из не-битой строки + деградационные RowIssue (цены, валюта)."""
     row_issues: list[RowIssue] = []
     product_id = row["id"].strip()
 
@@ -81,6 +111,16 @@ def _build_product(
             )
         )
 
+    currency, currency_issue = _resolve_currency(
+        row["currency"],
+        row_number,
+        product_id,
+        default_currency=default_currency,
+        allowed_currencies=allowed_currencies,
+    )
+    if currency_issue is not None:
+        row_issues.append(currency_issue)
+
     product = Product(
         id=product_id,
         category=row["category"].strip(),
@@ -91,7 +131,7 @@ def _build_product(
         desc_uz=_opt(row, "desc_uz"),
         price_wholesale=price_w,
         price_retail=price_r,
-        currency=row["currency"].strip(),
+        currency=currency,
         packaging=_opt(row, "packaging"),
         photo=_opt(row, "photo"),
         is_active=bool(parse_bool(row["is_active"])),
@@ -129,7 +169,12 @@ def parse(
                 )
             )
             continue
-        product, row_issues = _build_product(row, row_number)
+        product, row_issues = _build_product(
+            row,
+            row_number,
+            default_currency=default_currency,
+            allowed_currencies=allowed_currencies,
+        )
         products.append(product)
         issues.extend(row_issues)
 
