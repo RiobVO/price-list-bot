@@ -1,0 +1,12 @@
+# polling-транспорт: ровно ОДНА реплика (несколько → Telegram 409). Не масштабировать.
+services:
+  bot:
+    build: .
+    env_file: .env
+    # Секрет SA монтируется read-only в WORKDIR контейнера (=/app); путь совпадает
+    # с дефолтом GOOGLE_APPLICATION_CREDENTIALS=./service-account.json.
+    volumes:
+      - ./service-account.json:/app/service-account.json:ro
+    # Reaper зомби-процессов и корректный форвард сигналов (SIGTERM → graceful shutdown).
+    init: true
+    restart: unless-stopped
