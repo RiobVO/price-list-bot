@@ -137,6 +137,10 @@ async def run(settings: Settings) -> None:
     if choose_transport(settings) == "webhook":
         raise NotImplementedError("webhook transport — каркас, см. ADR 0008 (TODO infra)")
 
+    # Снять возможный старый webhook (иначе getUpdates молчит) и отбросить накопленные апдейты.
+    await bot.delete_webhook(drop_pending_updates=True)
+    me = await bot.get_me()
+    logger.info("polling_started", extra={"bot_username": me.username})
     polling = asyncio.create_task(dp.start_polling(bot, handle_signals=False))
     done, _ = await asyncio.wait(
         {polling, refresh_task, asyncio.create_task(stop.wait())},
