@@ -89,22 +89,28 @@ TDD, начиная со слоя `data` (каркас всего). **Первы
 
 ## Статус (2026-06-01)
 
-Слой **`data` готов и запушен** (`main` → github.com/RiobVO/price-list-bot): `models, coerce, fetch,
-config, parse, cache, refresh`. 166 тестов зелёные; `ruff` + `ruff format` + `mypy --strict` чисто;
-`coerce`/`parse` — 100% покрытие. Контракты типов на стыках — `docs/superpowers/specs/...design.md` §8.
-План слоя — `docs/superpowers/plans/2026-05-31-data-layer.md`.
+**Все слои серии готовы: `data` → `services` → `bot` → `infra`.** 355 тестов зелёные;
+`ruff` + `ruff format` + `mypy --strict src` чисто. Планы — `docs/superpowers/plans/` (4 файла),
+ADR — `docs/adr/` (включая 0008 транспорт/shutdown, 0009 SA-секрет, 0013 навигация bot).
 
-Дальше по серии: **`services`** (план ещё НЕ написан) → `bot` → `infra`. `services` — единственный мост
-бот↔кэш: навигация категория→подкатегория, поиск + узбекская нормализация, пагинация (`PAGE_SIZE`),
-формат цены/валюты для показа, протухание `callback`-id. Читает кэш через `CatalogCache.get_snapshot()`
-(синхронно, без сети), работает с иммутабельным `Snapshot`/`Catalog` из `src/data/models.py`.
+- **`data`:** `models, coerce, fetch, parse, cache, refresh, auth, sample`. `coerce`/`parse` — 100%.
+- **`services`:** фасад `CatalogService` (`categories/subcategories/product_page/product_card/search`),
+  `Ok|Stale`, UZ-нормализация, blake2s callback-id, формат цены, per-user `LanguageStore`.
+- **`bot` (aiogram 3.28):** `callbacks, states, keyboards, delivery, middlewares (language/throttle),
+  handlers (start/catalog/search)`. Двухуровневая навигация, поиск через FSM, фолбэк фото, протухание id.
+- **`infra`:** `Makefile` (гейт `make check`), `Dockerfile`+`.dockerignore` (non-root, SIGTERM, образ собран),
+  `docker-compose.yml`, `README.md`, `.env.example`, `.pre-commit-config.yaml`, CI (`.github/workflows/ci.yml`).
+- **`main.py`:** composition root — настройки→логирование→кэш→refresh-task→dispatcher→polling→graceful
+  shutdown. Перед polling: `delete_webhook(drop_pending_updates=True)`. **Демо-режим** `USE_SAMPLE_CATALOG`
+  (каталог из `src/data/sample.py`, без Google — локальный запуск с одним токеном).
 
-Уточнения, всплывшие при реализации `data` (оспоримы, не из брифа — учесть в `services`/ревью):
-- **Кэш не свапает пустой снимок:** `valid+skipped==0` → `try_swap` возвращает `False`, старый снимок жив.
-  «Валидный пустой каталог» (§Фаза 0) относится к парсингу; в кэш пустой `ParseResult` не кладётся.
-- **Коллизия заголовков:** две колонки с одинаковым нормализованным именем (strip+lower) в
-  `parse.normalize_headers` → молча побеждает последняя, без `RowIssue` (known limitation, не покрыто).
-- **`Catalog(...)` напрямую** принимает обычный dict — иммутабельность `by_id` гарантируется только через
-  `Catalog.build`; нет `__post_init__`-guard.
-- **Старт-валидация конфига:** нет проверки `DEFAULT_CURRENCY ∈ allowed_currencies()` и нижних границ у
-  `*_BACKOFF_*_S`/`SHUTDOWN_TIMEOUT_S` (см. `ДОПУЩЕНИЕ` по конфигу).
+Запуск: `cp .env.example .env` (BOT_TOKEN [+ `USE_SAMPLE_CATALOG=true` для демо, либо доступ к таблице]),
+затем `python -m src.main` / `docker compose up`. polling — строго одна реплика (иначе Telegram 409).
+
+Отложено (вне серии, по желанию): полный **webhook** (сейчас каркас под `USE_WEBHOOK`); **persist**
+языка/состояния (in-memory сбрасывается при рестарте); старт-валидация `DEFAULT_CURRENCY ∈ CURRENCIES`
+и нижних границ `*_BACKOFF_*_S`/`SHUTDOWN_TIMEOUT_S`; форс-рефреш по whitelist user_id.
+
+Known limitations (оспоримы): кэш не свапает пустой снимок (`valid+skipped==0` → `try_swap` False);
+коллизия нормализованных заголовков — молча побеждает последняя; навигация рендерит новым сообщением
+(не `edit`, см. ADR 0013).
