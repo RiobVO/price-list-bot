@@ -125,6 +125,9 @@ async def run(settings: Settings) -> None:
             run_refresh_loop(cache, fetch_fn, parse_fn, settings.CACHE_TTL_SECONDS, backoff)
         )
 
+    if choose_transport(settings) == "webhook":
+        raise NotImplementedError("webhook transport — каркас, см. ADR 0008 (TODO infra)")
+
     bot = Bot(settings.BOT_TOKEN.get_secret_value())
     dp = build_dispatcher(service, lang_store, settings)
 
@@ -134,9 +137,21 @@ async def run(settings: Settings) -> None:
         with contextlib.suppress(NotImplementedError):  # Windows
             loop.add_signal_handler(sig, stop.set)
 
-    if choose_transport(settings) == "webhook":
-        raise NotImplementedError("webhook transport — каркас, см. ADR 0008 (TODO infra)")
+    await serve(dp, bot, refresh_task, stop, shutdown_timeout=settings.SHUTDOWN_TIMEOUT_S)
 
+
+async def serve(
+    dp: Dispatcher,
+    bot: Bot,
+    refresh_task: asyncio.Task[None],
+    stop: asyncio.Event,
+    *,
+    shutdown_timeout: float,
+) -> None:
+    """Запустить polling до сигнала stop/падения refresh-task, затем graceful teardown.
+
+    Вынесено из run() ради тестируемости пути остановки (SIGTERM → stop.set) без сети.
+    """
     # Снять возможный старый webhook (иначе getUpdates молчит) и отбросить накопленные апдейты.
     await bot.delete_webhook(drop_pending_updates=True)
     me = await bot.get_me()
@@ -149,7 +164,7 @@ async def run(settings: Settings) -> None:
     polling.cancel()
     with contextlib.suppress(asyncio.CancelledError):
         await polling
-    await asyncio.wait_for(shutdown(refresh_task, bot), timeout=settings.SHUTDOWN_TIMEOUT_S)
+    await asyncio.wait_for(shutdown(refresh_task, bot), timeout=shutdown_timeout)
     if refresh_task in done and not refresh_task.cancelled():
         exc = refresh_task.exception()
         if isinstance(exc, FetchError) and not exc.transient:
