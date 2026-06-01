@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from typing import Any
 from unittest.mock import AsyncMock
 
 import pytest
@@ -12,14 +13,15 @@ from src.bot.delivery import send_product_card
 from src.services.models import ProductCard
 
 
-def _target() -> AsyncMock:
+def _target() -> Any:
+    """Fake-сообщение (Any: ассерты assert_awaited работают, передача в Message-параметр ок)."""
     return AsyncMock()
 
 
 @pytest.mark.asyncio
 async def test_text_only_card_uses_answer() -> None:
     target = _target()
-    await send_product_card(target, ProductCard(text="Сок", photo=None), markup="KB")
+    await send_product_card(target, ProductCard(text="Сок", photo=None), markup=None)
     target.answer.assert_awaited_once()
     target.answer_photo.assert_not_awaited()
 
@@ -27,7 +29,7 @@ async def test_text_only_card_uses_answer() -> None:
 @pytest.mark.asyncio
 async def test_photo_card_uses_answer_photo() -> None:
     target = _target()
-    await send_product_card(target, ProductCard(text="Сок", photo="http://x/a.jpg"), markup="KB")
+    await send_product_card(target, ProductCard(text="Сок", photo="http://x/a.jpg"), markup=None)
     target.answer_photo.assert_awaited_once()
     target.answer.assert_not_awaited()
 
@@ -39,7 +41,7 @@ async def test_bad_photo_falls_back_to_text(caplog: pytest.LogCaptureFixture) ->
         method=AsyncMock(), message="wrong file identifier"
     )
     with caplog.at_level(logging.WARNING):
-        await send_product_card(target, ProductCard(text="Сок", photo="http://x/bad"), markup="KB")
+        await send_product_card(target, ProductCard(text="Сок", photo="http://x/bad"), markup=None)
     target.answer_photo.assert_awaited_once()
     target.answer.assert_awaited_once()  # фолбэк: текст всё равно доставлен
     assert any("photo" in r.message for r in caplog.records)
