@@ -1,0 +1,23 @@
+# Локальные хуки на единый гейт качества (используют окружение проекта).
+# Установка: pre-commit install
+repos:
+  - repo: local
+    hooks:
+      - id: ruff-check
+        name: ruff check
+        entry: ruff check
+        language: system
+        types: [python]
+        pass_filenames: false
+      - id: ruff-format
+        name: ruff format --check
+        entry: ruff format --check
+        language: system
+        types: [python]
+        pass_filenames: false
+      - id: mypy
+        name: mypy --strict src
+        entry: mypy --strict src
+        language: system
+        types: [python]
+        pass_filenames: false
