@@ -27,6 +27,8 @@ class Settings(BaseSettings):
     # UI / троттлинг.
     PAGE_SIZE: int = Field(default=8, ge=1, le=10)
     THROTTLE_RATE_PER_SEC: float = Field(default=1.0, gt=0)
+    # Имя группы для товаров с пустой subcategory (бриф/Фаза 0: «Прочее»).
+    FALLBACK_SUBCATEGORY: str = "Прочее"
 
     # Доставка service-account: РОВНО один из двух способов (см. валидатор ниже).
     GOOGLE_APPLICATION_CREDENTIALS: str | None = None
