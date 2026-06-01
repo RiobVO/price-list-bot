@@ -34,6 +34,10 @@ class Settings(BaseSettings):
     GOOGLE_APPLICATION_CREDENTIALS: str | None = None
     GOOGLE_CREDENTIALS_B64: SecretStr | None = None
 
+    # Демо-режим: каталог из встроенного примера (src/data/sample.py), без Google Sheets.
+    # Для локального запуска без сервис-аккаунта/таблицы (см. README).
+    USE_SAMPLE_CATALOG: bool = False
+
     # Транспорт / логирование.
     USE_WEBHOOK: bool = False
     LOG_LEVEL: str = "INFO"
